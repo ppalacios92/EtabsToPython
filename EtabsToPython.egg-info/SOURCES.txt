@@ -1,0 +1,9 @@
+README.md
+setup.py
+EtabsToPython.egg-info/PKG-INFO
+EtabsToPython.egg-info/SOURCES.txt
+EtabsToPython.egg-info/dependency_links.txt
+EtabsToPython.egg-info/requires.txt
+EtabsToPython.egg-info/top_level.txt
+etabstopython/__init__.py
+etabstopython/model.py
