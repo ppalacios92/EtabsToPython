@@ -91,22 +91,30 @@ class EtabsModel:
         # Calcular altura acumulada desde la base hacia arriba
         df['Accumulated_Height'] = df.iloc[::-1]['Height'].cumsum()[::-1]
         
+        # Verificar si 'BASE' ya existe
+        if 'BASE' not in df['Story'].values:
+            # Tomar la última fila y duplicarla
+            base_row = df.iloc[[-1]].copy()
+            base_row['Story'] = 'Base'
+            base_row['Height'] = 0.0
+            base_row['Accumulated_Height'] = 0.0
+            df = pd.concat([df, base_row], ignore_index=True)
+
         # Guardar el DataFrame completo
         self.story_definitions = df
         print(f"✅ Loaded Story Definitions: {len(df)} stories.")
         
         # Calcular vector de alturas (agregando 0 al final para tener todas las cotas de niveles)
         heights = df['Accumulated_Height'].to_numpy()
-        heights = np.append(heights, 0)  # piso inferior
+        # heights = np.append(heights, 0)  # piso inferior
         heights = heights[::-1]          # ordenar de base hacia arriba
         heights = np.round(heights, 3)
         
         self.floor_heights = heights
-        print(f"📐 Computed accumulated floor heights: {self.floor_heights}")
 
-    @property
-    def story_names_full(self):
-        return ["BASE"] + self.story_definitions['Story'].tolist()
+    # @property
+    # def story_names_full(self):
+    #     return ["BASE"] + self.story_definitions['Story'].tolist()
 
     def load_point_object_connectivity(self):
         table_title = 'Point Object Connectivity'
@@ -264,8 +272,7 @@ class EtabsModel:
                 .astype(float)
                 .to_dict('index')
             )
-            print(f"📐 Assigned dimensions to {len(self.section_dim_dict)} frame sections.")
-
+            
         print(f"✅ Assigned colors to {len(self.section_color_dict)} frame sections.")
 
 
@@ -290,9 +297,9 @@ class EtabsModel:
         self.story_forces = self._get_table_as_dataframe(table_title)
         self.combos=self.story_forces['OutputCase'].unique()
         print(f"✅ Loaded Story Forces: {len(self.story_forces)} entries.")
-
+        print("---"*50)
         print(f"Unique combos: {self.combos}")
-
+        print("---"*50)
 
     def load_joint_displacements(self):
         table_title = 'Joint Displacements'
