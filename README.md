@@ -32,3 +32,16 @@ Clone the repository:
 ```bash
 git clone https://github.com/ppalacios92/EtabsToPython.git
 cd EtabsToPython
+pip install -r requirements.txt
+
+
+## Citation
+
+@misc{palacios2025etabstopython,
+  author       = {Patricio Palacios B.},
+  title        = {EtabsToPython: A Python-based ETABS data extraction and visualization tool},
+  year         = {2025},
+  publisher    = {GitHub},
+  journal      = {GitHub repository},
+  howpublished = {\url{https://github.com/ppalacios92/EtabsToPython}}
+}
