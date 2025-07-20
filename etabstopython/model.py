@@ -104,7 +104,9 @@ class EtabsModel:
         self.floor_heights = heights
         print(f"📐 Computed accumulated floor heights: {self.floor_heights}")
 
-
+    @property
+    def story_names_full(self):
+        return ["BASE"] + self.story_definitions['Story'].tolist()
 
     def load_point_object_connectivity(self):
         table_title = 'Point Object Connectivity'

@@ -84,3 +84,43 @@ def plot_structure_3d(model):
     ax.view_init(elev=10, azim=50)
 
     plt.show()
+
+
+# ==============================================================
+# Drift and Displacement Plotting Tools
+# ==============================================================
+
+def graph_disp_drifts_combos(model, story_disp_x, story_disp_y, story_drift_x, story_drift_y,
+                             ax1, ax2, ax1_twin, ax2_twin,
+                             color_x=[1, 0, 0], color_y=[0, 0, 1], line_width=2.0):
+
+
+    heights = model.floor_heights
+    story_names = model.story_definitions['Story'].tolist()
+    story_heights = model.story_definitions['Accumulated_Height'].tolist()
+
+    # Subplot 1: Desplazamientos
+    ax1.plot(story_disp_x, heights, 'o--', color=color_x, linewidth=line_width)
+    ax1.plot(-1 * np.array(story_disp_y), heights, 'o--', color=color_y, linewidth=line_width)
+    ax1.set_xlabel('Story Displacement (m)')
+    ax1.set_ylabel('Accumulated Height (m)')
+    ax1.set_title("Story Displacement - PRY: " + model.name, fontweight='bold', fontsize=10)
+    ax1.grid(True, linestyle='--', alpha=0.6)
+
+    ax1_twin.set_ylim(ax1.get_ylim())
+    ax1_twin.set_yticks(story_heights)
+    ax1_twin.set_yticklabels(story_names, fontsize=6)
+    ax1_twin.set_ylabel("Story")
+
+    # Subplot 2: Derivas
+    ax2.plot(story_drift_x, heights, 'o--', color=color_x, linewidth=line_width)
+    ax2.plot(-1 * np.array(story_drift_y), heights, 'o--', color=color_y, linewidth=line_width)
+    ax2.set_xlabel('Story Drifts (%)')
+    ax2.set_ylabel('Accumulated Height (m)')
+    ax2.set_title("Story Drifts - PRY: " + model.name, fontweight='bold', fontsize=10)
+    ax2.grid(True, linestyle='--', alpha=0.6)
+
+    ax2_twin.set_ylim(ax2.get_ylim())
+    ax2_twin.set_yticks(story_heights)
+    ax2_twin.set_yticklabels(story_names, fontsize=6)
+    ax2_twin.set_ylabel("Story")
