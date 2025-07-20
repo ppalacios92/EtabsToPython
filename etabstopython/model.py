@@ -102,7 +102,7 @@ class EtabsModel:
 
         # Guardar el DataFrame completo
         self.story_definitions = df
-        print(f"✅ Loaded Story Definitions: {len(df)} stories.")
+        # print(f"✅ Loaded Story Definitions: {len(df)} stories.")
         
         # Calcular vector de alturas (agregando 0 al final para tener todas las cotas de niveles)
         heights = df['Accumulated_Height'].to_numpy()
@@ -126,13 +126,13 @@ class EtabsModel:
         df['Z'] = df['Z'].astype(float)
         df['Label'] = df['Z'].map(label_dict)
         self.point_object_connectivity = df
-        print(f"✅ Loaded Point Object Connectivity: {len(df)} connections.")
+        # print(f"✅ Loaded Point Object Connectivity: {len(df)} connections.")
 
 # --------------------------------------------------------------
     def load_frame_section_property_definitions_summary(self):
         table_title = 'Frame Section Property Definitions - Summary'
         self.frame_section_property_definitions_summary = self._get_table_as_dataframe(table_title)
-        print(f"✅ Loaded Frame Section Property Definitions: {len(self.frame_section_property_definitions_summary)} properties.")
+        # print(f"✅ Loaded Frame Section Property Definitions: {len(self.frame_section_property_definitions_summary)} properties.")
 
 
 
@@ -140,31 +140,31 @@ class EtabsModel:
     def load_frame_section_property_definitions_concrete_rectangular(self):
         table_title='Frame Section Property Definitions - Concrete Rectangular'
         self.frame_section_property_definitions_concrete_rectangular = self._get_table_as_dataframe(table_title)
-        print(f"✅ Loaded Frame Section Property Definitions - Concrete Rectangular: {len(self.frame_section_property_definitions_concrete_rectangular)} properties.")
+        # print(f"✅ Loaded Frame Section Property Definitions - Concrete Rectangular: {len(self.frame_section_property_definitions_concrete_rectangular)} properties.")
 
 
 
     def load_frame_assignments_section_properties(self):
         table_title='Frame Assignments - Section Properties'
         self.frame_assignments_section_properties = self._get_table_as_dataframe(table_title)
-        print(f"✅ Loaded Frame Assignments - Section Properties: {len(self.frame_assignments_section_properties)} properties.")
+        # print(f"✅ Loaded Frame Assignments - Section Properties: {len(self.frame_assignments_section_properties)} properties.")
 
 
 # --------------------------------------------------------------
     def load_beam_object_connectivity(self):
         table_title = 'Beam Object Connectivity'
         self.beam_object_connectivity = self._get_table_as_dataframe(table_title)
-        print(f"✅ Loaded Beam Object Connectivity: {len(self.beam_object_connectivity)} entries.")
+        # print(f"✅ Loaded Beam Object Connectivity: {len(self.beam_object_connectivity)} entries.")
 
     def load_column_object_connectivity(self):
         table_title = 'Column Object Connectivity'
         self.column_object_connectivity = self._get_table_as_dataframe(table_title)
-        print(f"✅ Loaded Column Object Connectivity: {len(self.column_object_connectivity)} entries.")
+        # print(f"✅ Loaded Column Object Connectivity: {len(self.column_object_connectivity)} entries.")
 
     def load_brace_object_connectivity(self):
         table_title = 'Brace Object Connectivity'
         self.brace_object_connectivity = self._get_table_as_dataframe(table_title)
-        print(f"✅ Loaded Brace Object Connectivity: {len(self.brace_object_connectivity)} entries.")
+        # print(f"✅ Loaded Brace Object Connectivity: {len(self.brace_object_connectivity)} entries.")
 
 # --------------------------------------------------------------
     def build_linear_elements_dataframe(self):
@@ -215,7 +215,7 @@ class EtabsModel:
             df['SectProp'] = None
 
         self.frames_df = df
-        print(f"✅ Combined linear elements: {len(df)} total.")
+        # print(f"✅ Combined linear elements: {len(df)} total.")
 
 
 # --------------------------------------------------------------
@@ -223,13 +223,13 @@ class EtabsModel:
     def load_wall_object_connectivity(self):
         table_title = 'Wall Object Connectivity'
         self.wall_object_connectivity = self._get_table_as_dataframe(table_title)
-        print(f"✅ Loaded Wall Object Connectivity: {len(self.wall_object_connectivity)} entries.")
+        # print(f"✅ Loaded Wall Object Connectivity: {len(self.wall_object_connectivity)} entries.")
 
     def load_floor_object_connectivity(self):
         table_title = 'Floor Object Connectivity'
         df = self._get_table_as_dataframe(table_title)
         self.floor_object_connectivity = df
-        print(f"✅ Loaded Floor Object Connectivity: {len(df)} entries.")
+        # print(f"✅ Loaded Floor Object Connectivity: {len(df)} entries.")
 
         # Procesar puntos de losas por piso
         filtered_df = df.dropna(subset=['Story'])
@@ -246,7 +246,7 @@ class EtabsModel:
             vector_final.append(valores_numericos)
 
         self.floor_points_by_story = np.array(vector_final, dtype=object)
-        print(f"✅ Processed floor point groups by story: {len(self.floor_points_by_story)} levels.")
+        # print(f"✅ Processed floor point groups by story: {len(self.floor_points_by_story)} levels.")
 
 
 # --------------------------------------------------------------
@@ -273,7 +273,7 @@ class EtabsModel:
                 .to_dict('index')
             )
             
-        print(f"✅ Assigned colors to {len(self.section_color_dict)} frame sections.")
+        # print(f"✅ Assigned colors to {len(self.section_color_dict)} frame sections.")
 
 
 # --------------------------------------------------------------
@@ -281,7 +281,7 @@ class EtabsModel:
     def load_element_forces_columns(self):
         table_title = 'Element Forces - Columns'
         self.element_forces_columns = self._get_table_as_dataframe(table_title)
-        print(f"✅ Loaded Element Forces - Columns: {len(self.element_forces_columns)} entries.")
+        # print(f"✅ Loaded Element Forces - Columns: {len(self.element_forces_columns)} entries.")
 
 
 
@@ -289,27 +289,50 @@ class EtabsModel:
     def load_modal_participating_mass_ratios(self):
         table_title = 'Modal Participating Mass Ratios'
         self.modal_participating_mass_ratios = self._get_table_as_dataframe(table_title)
-        print(f"✅ Loaded Modal Participating Mass Ratios: {len(self.modal_participating_mass_ratios)} entries.")
+        # print(f"✅ Loaded Modal Participating Mass Ratios: {len(self.modal_participating_mass_ratios)} entries.")
 
 
     def load_story_forces(self):
         table_title = 'Story Forces'
         self.story_forces = self._get_table_as_dataframe(table_title)
         self.combos=self.story_forces['OutputCase'].unique()
-        print(f"✅ Loaded Story Forces: {len(self.story_forces)} entries.")
-        print("---"*50)
-        print(f"Unique combos: {self.combos}")
-        print("---"*50)
+        # print(f"✅ Loaded Story Forces: {len(self.story_forces)} entries.")
+        # print("---"*50)
+        # print(f"Unique combos: {self.combos}")
+        # print("---"*50)
 
     def load_joint_displacements(self):
         table_title = 'Joint Displacements'
         self.joint_displacements = self._get_table_as_dataframe(table_title)
-        print(f"✅ Loaded Joint Displacements: {len(self.joint_displacements)} entries.")
+        # print(f"✅ Loaded Joint Displacements: {len(self.joint_displacements)} entries.")
 
 
 
 
     def summary(self):
-        print("📦 Model Summary:")
-        print(f"- Units: {self.units}")
-        print(f"- Name: {self.name}")
+        print("📦 ETABS Model Summary")
+        print(f"🧾 Model name: {self.name}")
+        print(f"📏 Unit system code: {self.units}")
+        print("──────────────────────────────────────────────")
+        print(f"🏢 Story definitions loaded: {len(self.story_definitions)}")
+        print(f"📐 Floor heights vector: {self.floor_heights.tolist()}")
+        print(f"🔗 Point connections loaded: {len(self.point_object_connectivity)}")
+        print(f"📦 Frame section summary: {len(self.frame_section_property_definitions_summary)}")
+        print(f"🧱 Rectangular concrete sections: {len(self.frame_section_property_definitions_concrete_rectangular)}")
+        print(f"🧩 Frame assignments with sections: {len(self.frame_assignments_section_properties)}")
+        print(f"🧱 Beams loaded: {len(self.beam_object_connectivity)}")
+        print(f"🧱 Columns loaded: {len(self.column_object_connectivity)}")
+        print(f"🧱 Braces loaded: {len(self.brace_object_connectivity)}")
+        print(f"📊 Linear elements combined: {len(self.frames_df)}")
+        print(f"🧱 Walls loaded: {len(self.wall_object_connectivity)}")
+        print(f"🪵 Floors loaded: {len(self.floor_object_connectivity)}")
+        print(f"🧩 Floor point groups: {len(self.floor_points_by_story)} levels")
+        print(f"🎨 Frame section colors assigned: {len(self.section_color_dict)}")
+        print(f"📉 Element column forces: {len(self.element_forces_columns)}")
+        print(f"🌀 Modal mass ratios: {len(self.modal_participating_mass_ratios)}")
+        print(f"🧮 Story forces: {len(self.story_forces)}")
+        print("---"*50)
+        print(f"📊 Load combos: {self.combos}")
+        print("---"*50)
+        print(f"📍 Joint displacements: {len(self.joint_displacements)}")
+        print("──────────────────────────────────────────────")
