@@ -2,41 +2,77 @@
 
 A Python-based tool for extracting geometry, section properties, and structural analysis results directly from ETABS models using the COM API. This package is designed for structural engineers and researchers who aim to automate the post-processing, visualization, and interpretation of ETABS models using Python.
 
-## Features
+---
 
-- Connects directly to an open ETABS session.
-- Extracts:
-  - Story definitions and point connectivity
+## ⚙️ Features
+
+- Connects directly to an open ETABS session via the COM API.
+- Extracts the following information:
+  - Story definitions and point coordinates
   - Beam, column, brace, wall, and floor object connectivity
   - Frame section definitions and assignments
   - Modal participating mass ratios
-  - Element and story forces
-  - Joint displacements
-- Builds a full geometric and analytical representation using `pandas` DataFrames.
-- Assigns section-based colors and dimensions for 3D visualization and reconstruction.
+  - Element and story-level forces
+  - Joint displacements and rotations
+- Provides full geometric and analytical representation using pandas DataFrames.
+- Enables visualization and structural interpretation using custom plotting tools.
+- Supports automatic section tagging and colorization for 3D reconstruction.
 
-## Requirements
+---
 
-- ETABS installed and running (compatible with COM API)
-- Python 3.8+
-- Required Python packages:
-  - `comtypes`
-  - `numpy`
-  - `pandas`
-  - `matplotlib` (for optional 3D visualization)
+## 📦 Requirements
 
-## Installation
+- ETABS (must be installed and running)
+- Windows OS with COM API enabled
+- Python 3.8 or higher
+- Python libraries:
+  - comtypes
+  - numpy
+  - pandas
+  - matplotlib (optional for visualization)
 
-Clone the repository:
+---
+
+## 🚀 Installation
+
+Clone the repository and install dependencies:
 
 ```bash
 git clone https://github.com/ppalacios92/EtabsToPython.git
 cd EtabsToPython
 pip install -r requirements.txt
+```
+---
+
+## 📁 Repository Structure
+
+EtabsToPython/
+├── core/                 # Core ETABS model extraction and data handling
+├── tools/                # Plotting and post-processing utilities
+├── examples/             # Jupyter notebooks with usage examples
+├── config/               # Optional configuration files
+├── tests/                # Unit tests and validation
+└── README.md             # Project documentation
 
 
-## Citation
+---
+## 🛑 Disclaimer
+This tool is provided as-is, without any guarantees of accuracy, performance, or suitability for specific engineering tasks.
+The author assumes no responsibility for the interpretation of results, post-processing errors, or consequences of incorrect data extraction.
+Use at your own risk and always validate against the ETABS graphical environment and design codes.
 
+---
+## 👨‍💻 Author
+
+Developed by Patricio Palacios B.
+Structural Engineer | Python Developer | Seismic Modeler
+GitHub: @ppalacios92
+
+## 📚 How to Cite
+
+If you use this tool in your work, please cite it as follows:
+
+```bibtex
 @misc{palacios2025etabstopython,
   author       = {Patricio Palacios B.},
   title        = {EtabsToPython: A Python-based ETABS data extraction and visualization tool},
@@ -45,3 +81,8 @@ pip install -r requirements.txt
   journal      = {GitHub repository},
   howpublished = {\url{https://github.com/ppalacios92/EtabsToPython}}
 }
+```
+
+## 📄 Citation in APA (7th Edition)
+
+Palacios B., P. (2025). *EtabsToPython: A Python-based ETABS data extraction and visualization tool* [Computer software]. GitHub. https://github.com/ppalacios92/EtabsToPython
