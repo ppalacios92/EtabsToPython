@@ -40,7 +40,7 @@ Clone the repository and install dependencies:
 ```bash
 git clone https://github.com/ppalacios92/EtabsToPython.git
 cd EtabsToPython
-pip install -r requirements.txt
+pip install -e .
 ```
 ---
 
