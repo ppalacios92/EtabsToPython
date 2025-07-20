@@ -55,28 +55,71 @@ def extrude_frame(ax, p1, p2, width, height, color):
 # Drift and Displacement Calculation Tools
 # ==============================================================
 
-def derivas_combos(model, combo, Cd, Ie, R):
-    df = model.joint_displacements
-    heights = model.floor_heights
+# def derivas_combos(model, combo, Cd, Ie, R):
+#     df = model.joint_displacements
+#     heights = model.floor_heights
 
-    df = df[(df['OutputCase'] == combo) & (df['StepType'] == 'Max')].copy()
-    df[['Ux', 'Uy']] = df[['Ux', 'Uy']].apply(pd.to_numeric, errors='coerce')
-    max_disp = df.groupby('Story')[['Ux', 'Uy']].max().reset_index()
+#     df = df[(df['OutputCase'] == combo) & (df['StepType'] == 'Max')].copy()
+#     df[['Ux', 'Uy']] = df[['Ux', 'Uy']].apply(pd.to_numeric, errors='coerce')
+#     max_disp = df.groupby('Story')[['Ux', 'Uy']].max().reset_index()
 
-    orden_original = df['Story'].unique()
-    max_disp['Story'] = pd.Categorical(max_disp['Story'], categories=orden_original, ordered=True)
-    max_disp = max_disp.sort_values('Story').reset_index(drop=True)
+#     orden_original = df['Story'].unique()
+#     max_disp['Story'] = pd.Categorical(max_disp['Story'], categories=orden_original, ordered=True)
+#     max_disp = max_disp.sort_values('Story').reset_index(drop=True)
 
-    dx = max_disp['Ux'][::-1].values
-    dy = max_disp['Uy'][::-1].values
+#     dx = max_disp['Ux'][::-1].values
+#     dy = max_disp['Uy'][::-1].values
     
-    drift_x, drift_y = [], []
-    for i in range(1, len(heights)):
-        h = heights[i] - heights[i - 1]
-        drift_x.append(abs((dx[i] - dx[i - 1]) / h * Cd / Ie * 100 / R))
-        drift_y.append(abs((dy[i] - dy[i - 1]) / h * Cd / Ie * 100 / R))
+#     drift_x, drift_y = [], []
+#     for i in range(1, len(heights)):
+#         h = heights[i] - heights[i - 1]
+#         drift_x.append(abs((dx[i] - dx[i - 1]) / h * Cd / Ie * 100 / R))
+#         drift_y.append(abs((dy[i] - dy[i - 1]) / h * Cd / Ie * 100 / R))
 
-    drift_x = np.insert(drift_x, 0, 0)
-    drift_y = np.insert(drift_y, 0, 0)
+#     drift_x = np.insert(drift_x, 0, 0)
+#     drift_y = np.insert(drift_y, 0, 0)
 
-    return dx, dy, drift_x, drift_y
+#     return dx, dy, drift_x, drift_y
+
+
+def compute_story_displacement_bounds(model, combos_comp , factor=1.0):
+
+    # Copy displacements and ensure numerical
+    df_disp = model.joint_displacements.copy()
+    for col in ['Ux', 'Uy']:
+        df_disp[col] = pd.to_numeric(df_disp[col], errors='coerce')
+
+    df_disp['Ux'] *= factor
+    df_disp['Uy'] *= factor
+
+    # Filter desired combinations
+    df_filt = df_disp[df_disp['OutputCase'].isin(combos_comp)].copy()
+
+    # Get min and max per node
+    df_min = df_filt.groupby(['OutputCase', 'UniqueName'])[['Ux', 'Uy']].min().reset_index()
+    df_max = df_filt.groupby(['OutputCase', 'UniqueName'])[['Ux', 'Uy']].max().reset_index()
+
+    df_min = df_min.rename(columns={'Ux': 'Ux_min', 'Uy': 'Uy_min'})
+    df_max = df_max.rename(columns={'Ux': 'Ux_max', 'Uy': 'Uy_max'})
+
+    df_bounds = pd.merge(df_min, df_max, on=['OutputCase', 'UniqueName'])
+
+    # Add story info
+    df_info = df_filt[['OutputCase', 'UniqueName', 'Story']].drop_duplicates()
+    df_bounds = pd.merge(df_bounds, df_info, on=['OutputCase', 'UniqueName'], how='left')
+
+    # Group by story to get story-level max/min
+    df_plot = df_bounds.groupby(['OutputCase', 'Story']).agg({
+        'Ux_min': 'min', 'Ux_max': 'max',
+        'Uy_min': 'min', 'Uy_max': 'max'
+    }).reset_index()
+
+    # Map to accumulated height
+    story_map = model.story_definitions.set_index('Story')['Accumulated_Height'].to_dict()
+    df_plot['Height'] = df_plot['Story'].map(story_map)
+
+    # Sort by height
+    df_plot = df_plot.sort_values(by='Height')
+
+    return df_plot
+

@@ -1,7 +1,9 @@
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from etabstopython.tools import extrude_frame
+from etabstopython.tools import compute_story_displacement_bounds
 
 
 def plot_structure_3d(model):
@@ -83,44 +85,186 @@ def plot_structure_3d(model):
     ax.set_title(f"3D View Structure - PRY: {model.name}", fontweight='bold', fontsize=10)
     ax.view_init(elev=10, azim=50)
 
+    fig.text(0.99, -0.01, '© 2025 - Patricio Palacios B. - Torrefuerte', 
+            ha='right', va='bottom', fontsize=9, color='gray', style='italic')
+
+
     plt.show()
 
 
-# ==============================================================
-# Drift and Displacement Plotting Tools
-# ==============================================================
+def plot_story_displacement_bounds(model, combos_comp, color=[0.7, 0.7, 0.7], lw=1.0, highlight_combo=None , factor=1.0):
 
-def graph_disp_drifts_combos(model, story_disp_x, story_disp_y, story_drift_x, story_drift_y,
-                             ax1, ax2, ax1_twin, ax2_twin,
-                             color_x=[1, 0, 0], color_y=[0, 0, 1], line_width=2.0):
+    # === Calcular desplazamientos para combos principales ===
+    df_plot = compute_story_displacement_bounds(model, combos_comp , factor)
 
+    # === Calcular desplazamientos solo para el combo destacado si no está en la lista ===
+    df_plot_highlight = None
+    if highlight_combo and highlight_combo not in combos_comp:
+        df_plot_highlight = compute_story_displacement_bounds(model, [highlight_combo] , factor)
 
-    heights = model.floor_heights
+    # === Crear figura y subplots ===
+    fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2, figsize=(10, 6), sharex=False)
+
+    # === Plot para combinaciones normales ===
+    for combo in combos_comp:
+        data = df_plot[df_plot['OutputCase'] == combo]
+        height = data['Height'].values
+
+        disp_min_x = data['Ux_min'].values
+        disp_max_x = data['Ux_max'].values
+        disp_min_y = data['Uy_min'].values
+        disp_max_y = data['Uy_max'].values
+
+        ax1.plot(disp_min_x, height, 'o--', label=f'{combo} - min', color=color, alpha=0.6)
+        ax1.plot(disp_max_x, height, 'o-',  label=f'{combo} - max', color=color, linewidth=lw)
+
+        ax2.plot(disp_min_y, height, 'o--', label=f'{combo} - min', color=color, alpha=0.6)
+        ax2.plot(disp_max_y, height, 'o-',  label=f'{combo} - max', color=color, linewidth=lw)
+
+    # === Plot para highlight_combo si existe ===
+    if highlight_combo:
+        # Si ya se calculó en df_plot principal
+        if highlight_combo in combos_comp:
+            data_h = df_plot[df_plot['OutputCase'] == highlight_combo]
+        else:
+            data_h = df_plot_highlight[df_plot_highlight['OutputCase'] == highlight_combo]
+
+        height = data_h['Height'].values
+        disp_min_x = data_h['Ux_min'].values
+        disp_max_x = data_h['Ux_max'].values
+        disp_min_y = data_h['Uy_min'].values
+        disp_max_y = data_h['Uy_max'].values
+
+        ax1.plot(disp_min_x, height, 'o--', label=f'{highlight_combo} - min', color='tab:red', alpha=0.8)
+        ax1.plot(disp_max_x, height, 'o-',  label=f'{highlight_combo} - max', color='tab:blue', linewidth=2.5)
+
+        ax2.plot(disp_min_y, height, 'o--', label=f'{highlight_combo} - min', color='tab:red', alpha=0.8)
+        ax2.plot(disp_max_y, height, 'o-',  label=f'{highlight_combo} - max', color='tab:blue', linewidth=2.5)
+
+    # === Formato subplot Ux ===
+    ax1.set_xlabel('Displacement Ux [m]', fontweight='bold')
+    ax1.set_ylabel('Accumulated Height [m]', fontweight='bold')
+    ax1.set_title(f"Story Displacement Ux - Model: {model.name}", fontweight='bold', fontsize=11)
+    ax1.grid(True, linestyle='--', alpha=0.5)
+
+    # === Formato subplot Uy ===
+    ax2.set_xlabel('Displacement Uy [m]', fontweight='bold')
+    ax2.set_ylabel('Accumulated Height [m]', fontweight='bold')
+    ax2.set_title(f"Story Displacement Uy - Model: {model.name}", fontweight='bold', fontsize=11)
+    ax2.grid(True, linestyle='--', alpha=0.5)
+
+    # === Etiquetas de pisos al lado derecho ===
     story_names = model.story_definitions['Story'].tolist()
     story_heights = model.story_definitions['Accumulated_Height'].tolist()
 
-    # Subplot 1: Desplazamientos
-    ax1.plot(story_disp_x, heights, 'o--', color=color_x, linewidth=line_width)
-    ax1.plot(-1 * np.array(story_disp_y), heights, 'o--', color=color_y, linewidth=line_width)
-    ax1.set_xlabel('Story Displacement (m)')
-    ax1.set_ylabel('Accumulated Height (m)')
-    ax1.set_title("Story Displacement - PRY: " + model.name, fontweight='bold', fontsize=10)
-    ax1.grid(True, linestyle='--', alpha=0.6)
-
+    ax1_twin = ax1.twinx()
     ax1_twin.set_ylim(ax1.get_ylim())
     ax1_twin.set_yticks(story_heights)
     ax1_twin.set_yticklabels(story_names, fontsize=6)
     ax1_twin.set_ylabel("Story")
 
-    # Subplot 2: Derivas
-    ax2.plot(story_drift_x, heights, 'o--', color=color_x, linewidth=line_width)
-    ax2.plot(-1 * np.array(story_drift_y), heights, 'o--', color=color_y, linewidth=line_width)
-    ax2.set_xlabel('Story Drifts (%)')
-    ax2.set_ylabel('Accumulated Height (m)')
-    ax2.set_title("Story Drifts - PRY: " + model.name, fontweight='bold', fontsize=10)
-    ax2.grid(True, linestyle='--', alpha=0.6)
-
+    ax2_twin = ax2.twinx()
     ax2_twin.set_ylim(ax2.get_ylim())
     ax2_twin.set_yticks(story_heights)
     ax2_twin.set_yticklabels(story_names, fontsize=6)
     ax2_twin.set_ylabel("Story")
+
+    fig.text(0.99, -0.01, '© 2025 - Patricio Palacios B. - Torrefuerte', 
+                ha='right', va='bottom', fontsize=9, color='gray', style='italic')
+
+
+    plt.tight_layout()
+    plt.show()
+
+
+
+def plot_story_drift_bounds(model, combos_comp, color=[0.7, 0.7, 0.7], lw=1.0, highlight_combo=None, factor=1.0):
+
+    # === Calcular desplazamientos ===
+    df_plot = compute_story_displacement_bounds(model, combos_comp, factor)
+    df_plot_highlight = None
+    if highlight_combo and highlight_combo not in combos_comp:
+        df_plot_highlight = compute_story_displacement_bounds(model, [highlight_combo], factor)
+
+    # === Diccionario de alturas por piso ===
+    story_heights = model.story_definitions.set_index('Story')['Accumulated_Height'].to_dict()
+
+    # === Crear figura ===
+    fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2, figsize=(10, 6), sharex=False)
+
+    # === Función auxiliar para calcular derivas ===
+    def compute_drift(heights, disp):
+        drift = []
+        for i in range(1, len(disp)):
+            h = heights[i] - heights[i - 1]
+            d = abs(disp[i] - disp[i - 1]) / h * 100 
+            drift.append(d)
+        return np.insert(drift, 0, 0)
+
+    # === Combos normales ===
+    for combo in combos_comp:
+        data = df_plot[df_plot['OutputCase'] == combo].copy()
+        data = data.sort_values(by='Height')
+
+        height = data['Height'].values
+        dx = data['Ux_max'].values
+        dy = data['Uy_max'].values
+
+        drift_x = compute_drift(height, dx)
+        drift_y = compute_drift(height, dy)
+
+        ax1.plot(drift_x, height, 'o-', color=color, linewidth=lw, alpha=0.9, label=combo)
+        ax2.plot(drift_y, height, 'o-', color=color, linewidth=lw, alpha=0.9, label=combo)
+
+    # === Combo destacado ===
+    if highlight_combo:
+        if highlight_combo in combos_comp:
+            data_h = df_plot[df_plot['OutputCase'] == highlight_combo]
+        else:
+            data_h = df_plot_highlight[df_plot_highlight['OutputCase'] == highlight_combo]
+        data_h = data_h.sort_values(by='Height')
+
+        height = data_h['Height'].values
+        dx = data_h['Ux_max'].values
+        dy = data_h['Uy_max'].values
+
+        drift_x = compute_drift(height, dx)
+        drift_y = compute_drift(height, dy)
+
+        ax1.plot(drift_x, height, 'o-', color='tab:red', linewidth=2.5, label=f'{highlight_combo}')
+        ax2.plot(drift_y, height, 'o-', color='tab:blue', linewidth=2.5, label=f'{highlight_combo}')
+
+    # === Formato subplot Ux ===
+    ax1.set_xlabel('Drift X [%]', fontweight='bold')
+    ax1.set_ylabel('Accumulated Height [m]', fontweight='bold')
+    ax1.set_title(f"Story Drift Ux - Model: {model.name}", fontweight='bold', fontsize=11)
+    ax1.grid(True, linestyle='--', alpha=0.5)
+
+    # === Formato subplot Uy ===
+    ax2.set_xlabel('Drift Y [%]', fontweight='bold')
+    ax2.set_ylabel('Accumulated Height [m]', fontweight='bold')
+    ax2.set_title(f"Story Drift Uy - Model: {model.name}", fontweight='bold', fontsize=11)
+    ax2.grid(True, linestyle='--', alpha=0.5)
+
+    # === Etiquetas de pisos al lado derecho ===
+    story_names = model.story_definitions['Story'].tolist()
+    story_levels = model.story_definitions['Accumulated_Height'].tolist()
+
+    ax1_twin = ax1.twinx()
+    ax1_twin.set_ylim(ax1.get_ylim())
+    ax1_twin.set_yticks(story_levels)
+    ax1_twin.set_yticklabels(story_names, fontsize=6)
+    ax1_twin.set_ylabel("Story")
+
+    ax2_twin = ax2.twinx()
+    ax2_twin.set_ylim(ax2.get_ylim())
+    ax2_twin.set_yticks(story_levels)
+    ax2_twin.set_yticklabels(story_names, fontsize=6)
+    ax2_twin.set_ylabel("Story")
+
+    fig.text(0.99, -0.01, '© 2025 - Patricio Palacios B. - Torrefuerte', 
+            ha='right', va='bottom', fontsize=9, color='gray', style='italic')
+
+
+    plt.tight_layout()
+    plt.show()
