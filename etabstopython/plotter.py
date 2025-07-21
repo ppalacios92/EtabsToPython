@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from etabstopython.tools import extrude_frame
 from etabstopython.tools import compute_story_displacement_bounds
+from etabstopython.tools import compute_story_force_bounds
 
 
 def plot_structure_3d(model):
@@ -264,6 +265,111 @@ def plot_story_drift_bounds(model, combos_comp, color=[0.7, 0.7, 0.7], lw=1.0, h
 
     fig.text(0.99, -0.01, '© 2025 - Patricio Palacios B. - Torrefuerte', 
             ha='right', va='bottom', fontsize=9, color='gray', style='italic')
+
+
+    plt.tight_layout()
+    plt.show()
+
+
+
+
+def plot_story_shear_bounds(model, combos_comp, color=[0.7, 0.7, 0.7], lw=1.0, highlight_combo=None):
+    # === Obtener alturas de los pisos ===
+    altura_dict = model.story_definitions.set_index('Story')['Accumulated_Height'].to_dict()
+    altura_pisos = model.story_definitions.set_index('Story')['Height'].to_dict()
+
+    # === Calcular resumen de combos normales ===
+    resumen_max = compute_story_force_bounds(model, combos_comp)
+
+    # === Crear figura ===
+    fig, ax = plt.subplots(figsize=(9, 6))
+
+    # === Graficar combos comunes ===
+    for combo in combos_comp:
+        if highlight_combo and combo == highlight_combo:
+            continue  # Se grafica después
+        df_plot = resumen_max[resumen_max['OutputCase'] == combo].copy()
+        vx_vals, vy_vals, h_infs = [], [], []
+
+        for _, row in df_plot.iterrows():
+            piso = row['Story']
+            if pd.isna(piso) or piso not in altura_dict:
+                continue
+
+            h_sup = altura_dict[piso]
+            h_inf = h_sup - altura_pisos[piso]
+            vx = row['VX']
+            vy = -row['VY']  # Vy a la izquierda
+
+            ax.plot([vx, vx], [h_inf, h_sup], color=color, linestyle='-', alpha=0.8, linewidth=lw)
+            ax.plot([vy, vy], [h_inf, h_sup], color=color, linestyle='-', alpha=0.8, linewidth=lw)
+
+            vx_vals.append(vx)
+            vy_vals.append(vy)
+            h_infs.append(h_inf)
+
+        for j in range(len(h_infs) - 1):
+            ax.plot([vx_vals[j], vx_vals[j+1]], [h_infs[j], h_infs[j]], color=color, linestyle='-', alpha=0.8, linewidth=lw)
+            ax.plot([vy_vals[j], vy_vals[j+1]], [h_infs[j], h_infs[j]], color=color, linestyle='-', alpha=0.8, linewidth=lw)
+
+    # === Graficar combo destacado ===
+    if highlight_combo:
+        resumen_high = compute_story_force_bounds(model, [highlight_combo])
+        df_high = resumen_high[resumen_high['OutputCase'] == highlight_combo].copy()
+        vx_vals, vy_vals, h_infs = [], [], []
+
+        for _, row in df_high.iterrows():
+            piso = row['Story']
+            if pd.isna(piso) or piso not in altura_dict:
+                continue
+
+            h_sup = altura_dict[piso]
+            h_inf = h_sup - altura_pisos[piso]
+            vx = row['VX']
+            vy = -row['VY']
+
+            ax.plot([vx, vx], [h_inf, h_sup], color='tab:blue', linestyle='-', linewidth=2.5)
+            ax.plot([vy, vy], [h_inf, h_sup], color='tab:red', linestyle='-', linewidth=2.5)
+
+            vx_vals.append(vx)
+            vy_vals.append(vy)
+            h_infs.append(h_inf)
+
+        for j in range(len(h_infs) - 1):
+            ax.plot([vx_vals[j], vx_vals[j+1]], [h_infs[j], h_infs[j]], color='tab:blue', linestyle='-', linewidth=2.5)
+            ax.plot([vy_vals[j], vy_vals[j+1]], [h_infs[j], h_infs[j]], color='tab:red', linestyle='-', linewidth=2.5)
+
+    # === Formato ===
+    # ax.axvline(0, color='black', linewidth=0.8)
+    ax.set_xlabel('Shear Force [Tonf]', fontweight='bold')
+    ax.set_ylabel('Height [m]', fontweight='bold')
+    ax.set_title(f'Story Shear - Model: {model.name}', fontweight='bold')
+    ax.grid(True, linestyle='--', alpha=0.4)
+
+    # === Etiquetas de pisos al lado derecho ===
+    story_names = model.story_definitions['Story'].tolist()
+    story_heights = model.story_definitions['Accumulated_Height'].tolist()
+
+    ax_twin = ax.twinx()
+    ax_twin.set_ylim(ax.get_ylim())
+    ax_twin.set_yticks(story_heights)
+    ax_twin.set_yticklabels(story_names, fontsize=6)
+    ax_twin.set_ylabel("Story")
+
+    fig.text(0.99, -0.01, '© 2025 - Patricio Palacios B. - Torrefuerte', 
+             ha='right', va='bottom', fontsize=9, color='gray', style='italic')
+
+
+    # === Leyenda manual ===
+    from matplotlib.lines import Line2D
+
+    legend_elements = [
+        Line2D([0], [0], color=[0.7, 0.7, 0.7], lw=1.0, linestyle='-', label='All Rlz'),
+        Line2D([0], [0], color='tab:blue', lw=2.5, linestyle='-', label='Highlight - VX'),
+        Line2D([0], [0], color='tab:red', lw=2.5, linestyle='-', label='Highlight - VY'),
+    ]
+
+    ax.legend(handles=legend_elements, loc='upper right', fontsize=8)
 
 
     plt.tight_layout()

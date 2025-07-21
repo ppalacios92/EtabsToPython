@@ -123,3 +123,23 @@ def compute_story_displacement_bounds(model, combos_comp , factor=1.0):
 
     return df_plot
 
+def compute_story_force_bounds(model, combos_comp):
+   
+    df = model.story_forces.copy()
+
+    # Asegurar que sean numéricos
+    cols = ['P', 'VX', 'VY', 'MX', 'MY']
+    df[cols] = df[cols].apply(pd.to_numeric, errors='coerce')
+
+    # Filtrar combinaciones
+    df = df[df['OutputCase'].isin(combos_comp)]
+
+    # Agrupar por Story y OutputCase tomando el máximo absoluto
+    resumen = df.groupby(['Story', 'OutputCase'])[cols].agg(lambda x: x.abs().max()).reset_index()
+
+    # Ordenar pisos según el modelo
+    orden_pisos = model.story_definitions['Story'].tolist()
+    resumen['Story'] = pd.Categorical(resumen['Story'], categories=orden_pisos, ordered=True)
+    resumen.sort_values(['OutputCase', 'Story'], inplace=True)
+
+    return resumen
