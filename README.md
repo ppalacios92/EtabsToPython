@@ -45,7 +45,7 @@ pip install -e .
 ---
 
 ## 📁 Repository Structure
-
+```bash
 EtabsToPython/
 ├── core/                 # Core ETABS model extraction and data handling
 ├── tools/                # Plotting and post-processing utilities
@@ -53,7 +53,7 @@ EtabsToPython/
 ├── config/               # Optional configuration files
 ├── tests/                # Unit tests and validation
 └── README.md             # Project documentation
-
+```
 
 ---
 ## 🛑 Disclaimer
