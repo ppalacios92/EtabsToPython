@@ -57,6 +57,7 @@ class EtabsModel:
 
         # --- Cargar joint displacements ---
         self.load_joint_displacements()
+        self.joint_reactions()
 
 
     def _connect_to_etabs(self):
@@ -229,11 +230,21 @@ class EtabsModel:
         table_title = 'Floor Object Connectivity'
         df = self._get_table_as_dataframe(table_title)
         self.floor_object_connectivity = df
-        # print(f"✅ Loaded Floor Object Connectivity: {len(df)} entries.")
 
-        # Procesar puntos de losas por piso
+        # Caso 1: DataFrame vacío
+        if df.empty:
+            print("⚠️ No floor objects found. Creating empty floor_points_by_story.")
+            self.floor_points_by_story = np.array([], dtype=object)
+            return
+
+        # Caso 2: Falta la columna "Story"
+        if 'Story' not in df.columns:
+            print(f"⚠️ Column 'Story' not found in {table_title}. Available columns: {list(df.columns)}")
+            self.floor_points_by_story = np.array([], dtype=object)
+            return
+
+        # Procesar puntos de losas por piso (flujo normal)
         filtered_df = df.dropna(subset=['Story'])
-
         cambios_story = filtered_df.index[filtered_df['Story'].ne(filtered_df['Story'].shift())].tolist()
 
         vector_final = []
@@ -246,6 +257,7 @@ class EtabsModel:
             vector_final.append(valores_numericos)
 
         self.floor_points_by_story = np.array(vector_final, dtype=object)
+
         # print(f"✅ Processed floor point groups by story: {len(self.floor_points_by_story)} levels.")
 
 
@@ -306,7 +318,10 @@ class EtabsModel:
         self.joint_displacements = self._get_table_as_dataframe(table_title)
         # print(f"✅ Loaded Joint Displacements: {len(self.joint_displacements)} entries.")
 
-
+    def joint_reactions(self):
+        table_title = 'Joint Reactions'
+        self.joint_reactions = self._get_table_as_dataframe(table_title)
+        # print(f"✅ Loaded Joint Reactions: {len(self.joint_reactions)} entries.")
 
 
     def summary(self):
