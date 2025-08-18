@@ -1,4 +1,4 @@
-from setuptools import setup, find_packages
+from pathlib import Path
 
 setup(
     name='EtabsToPython',
@@ -13,7 +13,7 @@ setup(
     ],
     author='Patricio Palacios',
     description='Tools for converting ETABS models into Python objects for analysis and visualization',
-    long_description=open('README.md').read(),
+    long_description=Path("README.md").read_text(encoding="utf-8"),
     long_description_content_type='text/markdown',
     classifiers=[
         'Programming Language :: Python :: 3',

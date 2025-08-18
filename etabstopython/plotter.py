@@ -178,7 +178,6 @@ def plot_story_displacement_bounds(model, combos_comp, color=[0.7, 0.7, 0.7], lw
     plt.show()
 
 
-
 def plot_story_drift_bounds(model, combos_comp, color=[0.7, 0.7, 0.7], lw=1.0, highlight_combo=None, factor=1.0):
 
     # === Calcular desplazamientos ===
@@ -186,9 +185,6 @@ def plot_story_drift_bounds(model, combos_comp, color=[0.7, 0.7, 0.7], lw=1.0, h
     df_plot_highlight = None
     if highlight_combo and highlight_combo not in combos_comp:
         df_plot_highlight = compute_story_displacement_bounds(model, [highlight_combo], factor)
-
-    # === Diccionario de alturas por piso ===
-    story_heights = model.story_definitions.set_index('Story')['Accumulated_Height'].to_dict()
 
     # === Crear figura ===
     fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2, figsize=(10, 6), sharex=False)

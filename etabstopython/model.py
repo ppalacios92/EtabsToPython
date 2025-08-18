@@ -184,7 +184,7 @@ class EtabsModel:
                 if all(col in tabla.columns for col in cols_requeridas):
                     frame_parts.append(tabla[cols_requeridas].copy())
                 else:
-                    print(f"⚠️ {nombre} cargada pero le faltan columnas requeridas.")
+                    print(f"⚠️ {nombre} cargada pero le faltan elementos requeridos.")
             else:
                 print(f"⚠️ {nombre} no fue cargada.")
 
