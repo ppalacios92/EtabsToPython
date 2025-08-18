@@ -9,3 +9,8 @@ etabstopython/__init__.py
 etabstopython/model.py
 etabstopython/plotter.py
 etabstopython/tools.py
+etabstopython.egg-info/PKG-INFO
+etabstopython.egg-info/SOURCES.txt
+etabstopython.egg-info/dependency_links.txt
+etabstopython.egg-info/requires.txt
+etabstopython.egg-info/top_level.txt
