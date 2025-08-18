@@ -1,15 +1,16 @@
+from setuptools import setup, find_packages  
 from pathlib import Path
 
 setup(
     name='EtabsToPython',
     version='0.1.0',
-    packages=find_packages(),
+    packages=find_packages(),  
     install_requires=[
         'comtypes',
         'numpy',
         'pandas',
         'matplotlib',
-        'ipython'
+        'ipython',
     ],
     author='Patricio Palacios',
     description='Tools for converting ETABS models into Python objects for analysis and visualization',

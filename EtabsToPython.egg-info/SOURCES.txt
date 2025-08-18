@@ -7,3 +7,5 @@ EtabsToPython.egg-info/requires.txt
 EtabsToPython.egg-info/top_level.txt
 etabstopython/__init__.py
 etabstopython/model.py
+etabstopython/plotter.py
+etabstopython/tools.py
