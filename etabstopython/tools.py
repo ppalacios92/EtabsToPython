@@ -89,8 +89,11 @@ def compute_story_displacement_bounds(model, combos_comp , factor=1.0):
     for col in ['Ux', 'Uy']:
         df_disp[col] = pd.to_numeric(df_disp[col], errors='coerce')
 
-    df_disp['Ux'] *= factor
-    df_disp['Uy'] *= factor
+    # df_disp['Ux'] *= factor
+    # df_disp['Uy'] *= factor
+
+    df_disp['Ux'] = np.array(df_disp['Ux'], dtype=float) * factor
+    df_disp['Uy'] = np.array(df_disp['Uy'], dtype=float) * factor
 
     # Filter desired combinations
     df_filt = df_disp[df_disp['OutputCase'].isin(combos_comp)].copy()
