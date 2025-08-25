@@ -189,8 +189,16 @@ class EtabsModel:
                 print(f"⚠️ {nombre} no fue cargada.")
 
         if not frame_parts:
-            raise ValueError("No valid frame connectivity tables were found.")
-
+            # DataFrame vacío con todas las columnas finales que se esperan
+            columnas_finales = cols_requeridas + [
+                'PointIX','PointIY','PointIZ',
+                'PointJX','PointJY','PointJZ',
+                'SectProp'
+            ]
+            df = pd.DataFrame(columns=columnas_finales)
+            self.frames_df = df
+            return df
+        
         df = pd.concat(frame_parts, ignore_index=True)
 
         # Obtener coordenadas

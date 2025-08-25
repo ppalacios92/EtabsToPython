@@ -65,9 +65,15 @@ def plot_structure_3d(model):
             ax.scatter(row['PointJX'], row['PointJY'], row['PointJZ'], color='purple', marker='s', s=100)
 
     # === ESCALADO ===
-    all_x = np.concatenate([model.frames_df['PointIX'], model.frames_df['PointJX']]).astype(float)
-    all_y = np.concatenate([model.frames_df['PointIY'], model.frames_df['PointJY']]).astype(float)
-    all_z = np.concatenate([model.frames_df['PointIZ'], model.frames_df['PointJZ']]).astype(float)
+    # all_x = np.concatenate([model.frames_df['PointIX'], model.frames_df['PointJX']]).astype(float)
+    # all_y = np.concatenate([model.frames_df['PointIY'], model.frames_df['PointJY']]).astype(float)
+    # all_z = np.concatenate([model.frames_df['PointIZ'], model.frames_df['PointJZ']]).astype(float)
+
+
+    all_x = model.point_object_connectivity['X'].to_numpy(dtype=float)
+    all_y = model.point_object_connectivity['Y'].to_numpy(dtype=float)
+    all_z = model.point_object_connectivity['Z'].to_numpy(dtype=float)
+
 
     mid_x = (all_x.min() + all_x.max()) / 2
     mid_y = (all_y.min() + all_y.max()) / 2
