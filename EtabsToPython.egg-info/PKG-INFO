@@ -1,25 +1,16 @@
-Metadata-Version: 2.4
+Metadata-Version: 2.1
 Name: etabstopython
 Version: 0.1.0
 Summary: Tools for converting ETABS models into Python objects for analysis and visualization
+Home-page: UNKNOWN
 Author: Patricio Palacios
+License: UNKNOWN
+Platform: UNKNOWN
 Classifier: Programming Language :: Python :: 3
 Classifier: License :: OSI Approved :: MIT License
 Classifier: Operating System :: OS Independent
 Requires-Python: >=3.8
 Description-Content-Type: text/markdown
-Requires-Dist: comtypes
-Requires-Dist: numpy
-Requires-Dist: pandas
-Requires-Dist: matplotlib
-Requires-Dist: ipython
-Dynamic: author
-Dynamic: classifier
-Dynamic: description
-Dynamic: description-content-type
-Dynamic: requires-dist
-Dynamic: requires-python
-Dynamic: summary
 
 # EtabsToPython
 
@@ -109,3 +100,5 @@ If you use this tool in your work, please cite it as follows:
 ## 📄 Citation in APA (7th Edition)
 
 Palacios B., P. (2025). *EtabsToPython: A Python-based ETABS data extraction and visualization tool* [Computer software]. GitHub. https://github.com/ppalacios92/EtabsToPython
+
+
