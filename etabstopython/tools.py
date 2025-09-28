@@ -146,3 +146,42 @@ def compute_story_force_bounds(model, combos_comp):
     resumen.sort_values(['OutputCase', 'Story'], inplace=True)
 
     return resumen
+
+
+
+def story_max_over_avg_ratios(model, combos_comp):
+    """
+    Extrae y organiza datos del ratio Max Drift / Avg Drift por Story, para cada combinación.
+    
+    Retorna:
+    - stories: lista ordenada de nombres de pisos
+    - alturas: lista de alturas acumuladas
+    - data_dict: diccionario {combo: {'X': [...], 'Y': [...]}} con listas alineadas a `stories`
+    """
+
+    # === Leer tabla desde ETABS ===
+    df_ratios = model._get_table_as_dataframe('Story Max Over Avg Drifts').copy()
+    df_ratios = df_ratios[df_ratios['OutputCase'].isin(combos_comp)]
+    df_ratios['Ratio'] = pd.to_numeric(df_ratios['Ratio'], errors='coerce')
+
+    # === Mapear alturas desde definición de pisos ===
+    story_def = model.story_definitions
+    altura_dict = story_def.set_index('Story')['Accumulated_Height'].to_dict()
+    df_ratios['Height'] = df_ratios['Story'].map(altura_dict)
+    df_ratios = df_ratios.dropna(subset=['Height', 'Ratio']).sort_values(by='Height')
+
+    # === Lista de pisos ordenada por altura
+    stories = sorted(df_ratios['Story'].unique(), key=lambda s: altura_dict.get(s, 0))
+    alturas = [altura_dict[s] for s in stories]
+
+    # === Extraer valores por combo y dirección
+    data_dict = {}
+    for combo in combos_comp:
+        ratio_X = df_ratios[(df_ratios['OutputCase'] == combo) & (df_ratios['Direction'] == 'X')].groupby('Story')['Ratio'].mean()
+        ratio_Y = df_ratios[(df_ratios['OutputCase'] == combo) & (df_ratios['Direction'] == 'Y')].groupby('Story')['Ratio'].mean()
+        valores_X = [ratio_X.get(s, np.nan) for s in stories]
+        valores_Y = [ratio_Y.get(s, np.nan) for s in stories]
+        data_dict[combo] = {'X': valores_X, 'Y': valores_Y}
+
+    return stories, alturas, data_dict
+

@@ -86,3 +86,15 @@ If you use this tool in your work, please cite it as follows:
 ## 📄 Citation in APA (7th Edition)
 
 Palacios B., P. (2025). *EtabsToPython: A Python-based ETABS data extraction and visualization tool* [Computer software]. GitHub. https://github.com/ppalacios92/EtabsToPython
+
+---
+
+## 📜 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit pull requests, report bugs, or suggest new features through the GitHub issues page.

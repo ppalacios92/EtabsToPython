@@ -5,6 +5,7 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from etabstopython.tools import extrude_frame
 from etabstopython.tools import compute_story_displacement_bounds
 from etabstopython.tools import compute_story_force_bounds
+from etabstopython.tools import story_max_over_avg_ratios
 
 
 def plot_structure_3d(model):
@@ -376,3 +377,74 @@ def plot_story_shear_bounds(model, combos_comp, color=[0.7, 0.7, 0.7], lw=1.0, h
 
     plt.tight_layout()
     plt.show()
+
+
+
+
+
+def plot_story_max_over_avg_ratios(model, combos_comp, show=True, save_path=None):
+    """
+    Grafica el ratio Max Drift / Avg Drift por Story para múltiples combinaciones.
+    Dirección Y se muestra a la izquierda (negativo) y dirección X a la derecha (positivo).
+    """
+
+    # === Obtener datos desde tools
+    stories, alturas, data_dict = story_max_over_avg_ratios(model, combos_comp)
+
+    altura_dict = model.story_definitions.set_index('Story')['Accumulated_Height'].to_dict()
+
+    # === Posiciones para eje Y
+    y_pos = np.arange(len(stories))
+
+    # === Crear figura
+    fig, ax = plt.subplots(figsize=(9, 6))
+    bar_width = 0.8 / len(combos_comp)
+    offsets = np.linspace(-bar_width * (len(combos_comp)-1)/2, bar_width * (len(combos_comp)-1)/2, len(combos_comp))
+
+    legend_handles = []
+
+    for i, combo in enumerate(combos_comp):
+        valores_X = data_dict[combo]['X']
+        valores_Y = [-v if not np.isnan(v) else np.nan for v in data_dict[combo]['Y']]  # Dirección Y negativa
+
+        # Plot X positivo
+        bar_X = ax.barh(y_pos + offsets[i], valores_X, height=bar_width, label=combo)
+        # Plot Y negativo con mismo color
+        ax.barh(y_pos + offsets[i], valores_Y, height=bar_width, color=bar_X[0].get_facecolor())
+
+        legend_handles.append(bar_X[0])
+
+    # === Ejes
+    ax.set_xlim(-2, 2)
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels([f"{altura_dict[s]:.2f}" for s in stories], fontsize=10)
+    ax.set_ylabel('Height [m]', fontsize=12, fontweight='bold')
+
+    ax_twin = ax.twinx()
+    ax_twin.set_ylim(ax.get_ylim())
+    ax_twin.set_yticks(y_pos)
+    ax_twin.set_yticklabels(stories, fontsize=9)
+    ax_twin.set_ylabel('Story', fontsize=11)
+
+    # === Estética
+    ax.axvline(0, color='black', linewidth=0.8)
+    ax.set_xlabel('Max Drift / Avg Drift (Ratio)', fontsize=12, fontweight='bold')
+    ax.set_title(f'Max Drift / Avg Drift (Ratio) - Model: {model.name}', fontweight='bold')
+    ax.tick_params(axis='x', labelsize=10)
+    ax.grid(axis='x', linestyle='--', alpha=0.4)
+
+    # === Leyenda
+    fig.legend(handles=legend_handles, labels=combos_comp,
+               loc='lower center', bbox_to_anchor=(0.5, -0.01),
+               ncol=4, fontsize=9, title='Combinación', title_fontsize=10, frameon=False)
+
+    # === Firma inferior
+    fig.text(0.99, -0.01, '© 2025 - Patricio Palacios B. - Torrefuerte',
+             ha='right', va='bottom', fontsize=9, color='gray', style='italic')
+
+    fig.subplots_adjust(bottom=0.2)
+
+    if save_path:
+        plt.savefig(save_path, dpi=300)
+    if show:
+        plt.show()
