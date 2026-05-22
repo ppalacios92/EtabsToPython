@@ -4,3 +4,9 @@ _smoke_plots/
 __pycache__/
 *.pyc
 .pytest_cache/
+.claude/
+_smoke_plots/
+*.egg-info/
+__pycache__/
+*.pyc
+.pytest_cache/
