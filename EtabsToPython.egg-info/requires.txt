@@ -1,5 +1,0 @@
-comtypes
-numpy
-pandas
-matplotlib
-ipython
