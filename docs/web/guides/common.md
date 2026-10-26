@@ -106,6 +106,8 @@ noted; lengths in **mm**, stress **MPa**.
 | Function | §ACI | Notes |
 |---|---|---|
 | `vc_simplified(*, b, d, concrete)` | §22.5.5.1 | `0.17·λ·√fc·b·d` |
+| `lambda_s(d)` | §22.5.5.1.3 / §22.6.5.3 | `min(sqrt(2/(1+d/254)), 1.0)` |
+| `vc_one_way(*, b, d, rho_w, concrete, av_ge_av_min, Nu=0, Ag=0)` | Table 22.5.5.1 | lesser tabulated expression with Av≥Av,min; size-effect expression otherwise; cap `0.42λ√fc·b·d` |
 | `vc_detailed(*, b, d, Nu, Ag, rho_w, concrete)` | §22.5.5.1 | with axial `Nu` (kN) + `rho_w` |
 | `vs_capacity(*, Av, fyt, d, s)` | §22.5.10.5.3 | `Av·fyt·d/s` |
 | `vs_max(*, b, d, concrete)` | §22.5.1.2 | web-crushing cap `0.66√fc·b·d` |
@@ -114,8 +116,27 @@ noted; lengths in **mm**, stress **MPa**.
 | `vc_zero_seismic(*, V_seismic, V_total, Pu, Ag, fc)` | §18.6.5.2 / §18.7.6.2.1 | bool: `V_seismic≥0.5V_total` **and** `Pu<Ag·fc/20` |
 | `alpha_c(hw_over_lw)` | Table 18.10.4.1 | 0.25 (≤1.5) → 0.17 (≥2.0) |
 | `vn_wall(*, Acv, fc, rho_t, fyt, hw_over_lw, lam=1.0)` | §18.10.4.1 | `(α_c·λ·√fc + rho_t·fyt)·Acv` |
-| `vn_wall_max(*, Acv, fc)` | §18.10.4.4 | cap `0.83·√fc·Acv` |
+| `alpha_sh(*, acf=0, bcf=None, bw)` | §18.10.4.4 | `0.7(1+sqrt(Acf/(bcf·bw)))`, bounded 1.0…1.2 |
+| `vn_wall_max(*, Acv, fc, alpha_sh=1.0)` | §18.10.4.4 | individual cap `αsh·0.83·√fc·Acv` |
+| `vn_wall_group_max(*, acv_list, fc, alpha_sh_list=None)` | §18.10.4.4 | common-lateral-force group cap `Σ(αsh·0.66·√fc·Acv)` |
 | `ve_in_plane_capacity_wall(*, Mpr, Mu=None, Vu=None, omega_v_factor=1.5)` | §18.10.3.1 | capacity-design Ve |
+
+### Two-way shear
+
+`bo_rectangular(*, c1, c2, d, position='interior')` returns the §22.6.4
+critical perimeter at `d/2` from the supported-area faces. For edge and corner
+supports, `c1` is perpendicular to the free edge. `vc_two_way(...)` returns the
+least §22.6.5.3 stress expression in MPa:
+
+```text
+min(0.33, 0.17(1 + 2/β), 0.083(2 + αs·d/bo)) · λs·λ·√fc
+```
+
+where `αs` is 40 / 30 / 20 for interior / edge / corner supports.
+`vc_two_way_force(...)` returns `vc·bo·d` in kN. With stirrups,
+`vc_two_way_max_with_stirrups(*, d, concrete)` returns the Table 22.6.6.1
+concrete term `0.17λsλ√fc`; evaluate the steel term separately as
+`vs = Av·fyt/(bo·s)`.
 
 ### Confinement & spacing — [`design.common.spacing`](../api/common.md)
 

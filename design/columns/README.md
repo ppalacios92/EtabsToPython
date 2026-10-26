@@ -152,7 +152,7 @@ column.surface                     # Surface
 column.surface[0]                  # InteractionDiagram around X (Mxx)
 column.surface[90]                 # InteractionDiagram around Y (Myy)
 column.surface.at_Pu(Pu)           # (Mx, My) arrays of the biaxial envelope at Pu
-column.surface.volume(n_Pu=25)     # (Pu_grid, Mx_grid, My_grid) for 3D plots
+column.surface.volume(n_Pu=25, close_top=True)     # (Pu_grid, Mx_grid, My_grid) for 3D plots
 column.surface.check(Pu=, Mux=, Muy=)   # (passed, ratio) — 3D biaxial check
 
 column.Po, column.To
@@ -164,6 +164,9 @@ column.Mn.at(Pu=0, angle=0)        # scalar at Pu, theta
 column.Mn.peak(angle=0)            # balanced moment at one angle
 column.Mn[0, 2500]                 # == column.Mn.at(angle=0, Pu=2500)
 ```
+
+`volume(..., close_top=True)` closes the P-M-M mesh with the flat
+`φPn,max` plateau (`Mx = My = 0` at `Pu_max`).
 
 ### 3.4 Three-mode `design()`
 
@@ -345,7 +348,7 @@ layer (within `layer_tol = 5 mm`). Result:
 | Strength reduction φ in shear | §21.2.1 | `common/factors.py::phi_shear` |
 | Po — pure compression | §22.4.2.1 | `analysis/section_analysis.py::pn_max` |
 | Pn,max cap (0.80 ties / 0.85 spirals) | §22.4.2.1 | same |
-| Vc simplified | §22.5.5.1 | `Column._av_s_required_for_direction` |
+| One-way Vc (Table expressions, λs, cap) | Table 22.5.5.1 | `common.shear::vc_one_way` |
 | Mpr — probable moment (1.25·fy, φ=1.0) | §18.6.5 / §18.7.6.1 | `columns/probable.py` |
 | lo confined region | §18.7.5.1 | `confinement.py::lo_length` |
 | hx ≤ 350 mm | §18.7.5.2 | `confinement.py::hx_check` + picker bump |
@@ -575,9 +578,9 @@ them with stricter forms if your project demands it.
 6. **`_count_longitudinal_per_face` is layer-based** with
    `layer_tol = 5 mm`. Works for perimeter-bar layouts; non-standard
    layouts may need a wider tolerance.
-7. **`Vc` uses the simplified §22.5.5.1 form** (`0.17·λ·√fc·bw·d`).
-   The detailed Vc with `rho_w` and axial effects is available in
-   `beams/shear.py::vc_detailed` but not consumed by `Column`.
+7. **`Vc` uses `common.shear.vc_one_way`** (Table 22.5.5.1): it selects the
+   appropriate lesser tabulated expression when `Av ≥ Av,min`, applies `λs`
+   when it is not, and caps the SI result at `0.42·λ·√fc·bw·d`.
 8. **`Ve_capacity` is computed at θ=0 and θ=90 only.** Off-axis seismic
    shears (rotated frames) would require sweeping Mpr at intermediate
    angles. Not implemented.

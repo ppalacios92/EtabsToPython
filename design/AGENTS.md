@@ -111,11 +111,14 @@ NINGÚN archivo en `beams/`, `columns/`, `walls/` puede contener literal:
 | Hardcode | Reemplazo |
 |---|---|
 | `0.17 * lam * sqrt_fc * b * d / 1000` | `vc_simplified(b, d, concrete)` |
+| one-way Table 22.5.5.1 Vc logic | `lambda_s(d)`, `vc_one_way(...)` |
+| two-way §22.6 Vc logic | `bo_rectangular(...)`, `vc_two_way(...)`, `vc_two_way_force(...)` |
 | `Av * fyt * d / (s * 1000)` | `vs_capacity(Av, fyt, d, s)` |
 | `(Vu/phi - Vc) * 1000 / (fyt * d)` | `av_s_required(...)` |
 | `0.85 - 0.05*(fc-28)/7` | `beta1(fc)` |
 | `phi = 0.90 if tc else 0.65` | `phi_axial_flexure(eps_t, eps_ty)` |
 | `0.83 * sqrt(fc) * Acv / 1000` | `vn_wall_max(Acv, fc)` |
+| wall flange/group shear limits | `alpha_sh(...)`, `vn_wall_group_max(...)` |
 | `phi = 0.75` (shear) | `phi_shear()` |
 | `Pu < Ag*fc/20` (§18.7.6.2.1 trigger) | `vc_zero_seismic(...)` |
 

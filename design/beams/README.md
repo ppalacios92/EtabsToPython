@@ -295,6 +295,16 @@ results.envelope   # Pointwise worst of the three.
 - `Vu_design = max(|Vu_i|, |Vu_mid|, |Vu_j|)`.
 - `av_s_required = (Vu_design/φ − Vc) / (fyt · d)`.
 
+Concrete shear is evaluated with `common.shear.vc_one_way`, implementing
+Table 22.5.5.1. With `Av ≥ Av,min`, the lesser tabulated expression governs;
+otherwise the size-effect expression uses
+`λs = min(sqrt(2/(1 + d/254)), 1.0)`. The result is capped at
+`0.42·λ·√fc·bw·d` (SI).
+
+`mn_doubly` uses strain compatibility solved by bisection for every case;
+there is no symmetric-reinforcement shortcut. This permits the nominal
+compression layer to develop tension in thin members.
+
 ### 5.3 Capacity (§18.6.5)
 
 Mpr is computed in both senses (positive and negative bending):

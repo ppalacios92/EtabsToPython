@@ -92,10 +92,11 @@ Prefer importing canonical shared helpers from `design.common` or `design`, not 
   - `UnitSystem` gives display factors and conversions to internal values.
 - `factors.py`: `beta1`, `phi_axial_flexure`, `phi_shear`, wall/column seismic amplification defaults.
 - `shear.py`: canonical shear equations for beams, columns, and walls.
-  - `vc_simplified`, `vc_detailed`, `vs_capacity`, `vs_max`
+  - `vc_simplified`, `lambda_s`, `vc_one_way`, `vc_detailed`, `vs_capacity`, `vs_max`
   - `av_s_required`, `av_s_minimum`
   - `vc_zero_seismic`
-  - `alpha_c`, `vn_wall`, `vn_wall_max`, `ve_in_plane_capacity_wall`
+  - `bo_rectangular`, `vc_two_way`, `vc_two_way_force`, `vc_two_way_max_with_stirrups`
+  - `alpha_c`, `alpha_sh`, `vn_wall`, `vn_wall_max`, `vn_wall_group_max`, `ve_in_plane_capacity_wall`
 - `spacing.py`: canonical confinement/spacing helpers for beams and columns.
 - `probable.py`: probable strength helpers using `fy_factor`, including `mpr_envelope`.
 - `contracts.py`: runtime-checkable protocols and `wall_demands_to_be`.

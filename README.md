@@ -2,6 +2,14 @@
 
 A Python-based tool for extracting geometry, section properties, and structural analysis results directly from ETABS models using the COM API. This package is designed for structural engineers and researchers who aim to automate the post-processing, visualization, and interpretation of ETABS models using Python.
 
+## ACI 318-25 corrections
+
+- §22.2: doubly reinforced flexure uses strain compatibility for all layouts.
+- §22.4.2.1: P-M-M surface volumes close at the flat `φPn,max` plateau.
+- Table 22.5.5.1: one-way Vc uses the applicable table expressions, `λs`, and the SI cap.
+- §18.10.2.1 / §18.10.4.4: special-wall distributed reinforcement and individual/group shear limits are enforced.
+- §22.6: two-way shear provides critical-perimeter and concrete-strength helpers for interior, edge, and corner supports.
+
 ---
 
 ## ⚙️ Features

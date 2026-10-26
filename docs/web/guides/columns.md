@@ -210,7 +210,7 @@ by steel weight (kg/m³); the `design()` envelope is included as `is_baseline`.
 ```python
 col.surface.check(Pu=2200, Mux=180, Muy=120)   # (passed, ratio) — Bresler §22.4.2.2
 col.surface.at_Pu(2200, full_circle=True)       # (Mx, My) envelope at fixed Pu
-col.surface.volume(n_Pu=25, Pu_min=None, Pu_max=None, full_circle=True)  # (Pu, Mx, My) grids
+col.surface.volume(n_Pu=25, Pu_min=None, Pu_max=None, full_circle=True, close_top=True)  # (Pu, Mx, My) grids
 col.surface[45.0]                                # InteractionDiagram at 45°
 col.surface.angles                               # all neutral-axis angles (deg)
 col.phi_Mn.at(Pu=2200, angle=0.0)                # interpolate φMn at a Pu/angle
@@ -218,6 +218,16 @@ col.phi_Mn.at(Pu=2200, angle=0.0)                # interpolate φMn at a Pu/angl
 
 The underlying `InteractionSurface` adds `at_angle(deg)`, `envelope_at_Pu(Pu,
 full_circle=True)`, `volume_slices(n_Pu=30, …)`, and `check_demand(Pu, Mux, Muy)`.
+
+`close_top=True` (the default) closes the sampled P-M-M volume with the flat
+`φPn,max` plateau: a final row has `Mx = My = 0` at `Pu_max`, rather than
+leaving the top as an open ring.
+
+### One-way shear
+
+Column shear uses `design.common.shear.vc_one_way` and Table 22.5.5.1: the
+lesser tabulated expression when `Av ≥ Av,min`, the `λs` size-effect expression
+otherwise, and the SI cap `0.42·λ·√fc·bw·d`.
 
 ## Reporting
 

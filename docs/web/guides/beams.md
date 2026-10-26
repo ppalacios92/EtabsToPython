@@ -258,6 +258,19 @@ beam.set_units("Tonf_m_C")      # change presentation units
 - **Vc = 0** in `lo` when `V_seismic ≥ 0.5·V_total` **and** `Pu < Ag·fc/20`
   (§18.6.5.2), via `design.common.shear.vc_zero_seismic`.
 
+### One-way shear and doubly reinforced flexure
+
+Beam concrete shear uses `vc_one_way` from Table 22.5.5.1. With
+`Av ≥ Av,min`, it takes the lesser of the tabulated concrete expressions;
+without minimum transverse reinforcement it uses the size-effect expression
+with `λs = min(sqrt(2/(1+d/254)), 1.0)`. In every case the SI cap is
+`0.42·λ·√fc·bw·d`.
+
+`flexure.mn_doubly` solves strain compatibility by bisection for every
+reinforcement layout. It does not apply a symmetric-steel shortcut: the
+compression-layer strain and stress are resolved explicitly, including the
+case where that layer is in tension in a thin member.
+
 ### Flexure & seismic helper functions
 
 These pure functions back the beam and are importable directly:

@@ -36,7 +36,8 @@ wall = Wall.rectangular(
 | `be_top_thickness` / `be_bot_thickness` | float \| None | `None` → `tw` | BE thickness across `tw` (mm) |
 | `be_align` | str \| None | `None` → `'center'` | BE alignment: `'left'`·`'center'`·`'right'` |
 | `be_top_align` / `be_bot_align` | str \| None | `None` | Per-end alignment override |
-| `n_x_be` | int | `3` | Bars across BE thickness (§18.10.6.4(b); must be ≥3) |
+| `n_x_be` | int | `3` | Bars across BE thickness (must be ≥2; hoops and hx govern transverse detailing) |
+| `n_walls_sharing` | int | `1` | Identical wall segments sharing the storey shear |
 | `n_y_be` | int | `4` | Bars along BE length |
 | `db_be` | float | `20.0` | BE bar diameter (mm) |
 | `db_stirrup` | float | `10.0` | BE hoop diameter (mm) |
@@ -56,7 +57,7 @@ BE flush to one web face (C, T, L, asymmetric shapes).
 Wall(*, section: WallSection, hw, lu=None, rho_t=0.0025, rho_l=0.0025,
      fyt=420.0, seismic=True, omega_v_factor=1.5, hx=200.0,
      transverse_bar_diameter=10.0, web_bar_diameter=10.0,
-     n_x_be=3, be_db_default=22.0, be_n_y_default=5,
+     n_x_be=3, n_walls_sharing=1, be_db_default=22.0, be_n_y_default=5,
      units=None, bar_schedule=None, label="Wall", run_settings=None)
 ```
 
@@ -70,7 +71,8 @@ Wall(*, section: WallSection, hw, lu=None, rho_t=0.0025, rho_l=0.0025,
 | `omega_v_factor` | `1.5` | Capacity-design shear amplifier |
 | `hx` | `200.0` | BE hoop spacing parameter (mm) |
 | `transverse_bar_diameter` / `web_bar_diameter` | `10.0` | Hoop / web bar diameters (mm) |
-| `n_x_be` | `3` | Bars across BE thickness (≥3, else `ValueError`) |
+| `n_x_be` | `3` | Bars across BE thickness (≥2, else `ValueError`) |
+| `n_walls_sharing` | `1` | Identical wall segments sharing the storey shear |
 | `be_db_default` / `be_n_y_default` | `22.0` / `5` | As-built BE bar diameter / count |
 | `run_settings` | `None` | Merged with `{"n_angles": 19, "n_points": 60}` |
 
@@ -119,7 +121,8 @@ Capacity snapshot. With `biaxial=True` also computes the out-of-plane diagram.
     |---|---|
     | `Po` / `To` / `phi_Pn_max` | axial caps (kN) |
     | `surface` / `diagram` / `diagram_out` | PMM surface + in/out-of-plane diagrams |
-    | `phi_Vn` / `Vn_max` | reduced / max in-plane shear (kN) |
+    | `phi_Vn` / `Vn_max` | reduced / governing max in-plane shear (kN) |
+    | `Vn_max_individual` / `Vn_max_group_per_wall` | individual / common-lateral-force limit (kN) |
     | `rho_t_provided` / `rho_l_provided` | provided web ratios |
     | `rho_t_min` / `rho_l_min` | minimum web ratios |
     | `double_curtain_required` | two reinforcement layers needed |
@@ -200,7 +203,8 @@ weight. `clear_cache` resets the surface, scalars, and BE columns.
 |---|---|
 | `surface` | PMM `Surface` (lazy) |
 | `Po` / `To` / `phi_Pn_max` | axial caps (kN) |
-| `phi_Vn` / `Vn_max` | reduced / max in-plane shear (kN) |
+| `phi_Vn` / `Vn_max` | reduced / governing max in-plane shear (kN) |
+| `Vn_max_individual` / `Vn_max_group_per_wall` | individual / common-lateral-force limit (kN) |
 | `Mn` / `phi_Mn` / `Pn` / `phi_Pn` | field-view proxies |
 | `has_boundary_elements` | whether BEs are present |
 | `be_top` / `be_bot` | `Optional[Column]` — the BEs as real columns (lazy) |
@@ -235,6 +239,18 @@ Vu_out  -> Vux   (out-of-plane shear)
 In-plane shear is amplified by `omega_v` (§18.10.3.1.2): default `1.5`, dropping to
 `1.0` for short walls. The wall reports `Ve_capacity`, `Ve_used`, `amplification`,
 and the `alpha_c` factor (§18.10.4.1, interpolated from `hw/lw`).
+
+### §18.10.4.4 limits and distributed reinforcement
+
+`alpha_sh(*, acf, bcf, bw)` is 1.0 for a rectangular wall and otherwise
+`0.7(1 + sqrt(Acf/(bcf·bw)))`, bounded to 1.0…1.2. The individual cap is
+`αsh·0.83·√fc·Acv`; a line of walls sharing storey shear is also checked by
+`vn_wall_group_max`, using `0.66·√fc·Acv` per vertical segment. `Vn_max` is
+the governing individual/group per-wall limit.
+
+For special walls, `rho_l = rho_t = 0.0025` unless the §18.10.2.1
+low-shear exception applies. Otherwise `rho_min_distributed` uses Table
+11.6.1 with `Vu`, `db`, and `fy`.
 
 ## Boundary-element & coupling helpers
 

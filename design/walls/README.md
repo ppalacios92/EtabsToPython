@@ -20,6 +20,21 @@ length stabilizes.
 Internal numerics: **MPa, mm, kN, kN·m**. Presentation units
 configurable through `wall.set_units(...)`.
 
+## Shear limits and distributed reinforcement
+
+`Wall(..., n_walls_sharing=1)` checks both the individual §18.10.4.4 cap
+`αsh·0.83·√fc·Acv` and the common-lateral-force group cap based on
+`0.66·√fc·Acv` per vertical wall segment. `WallCapacity` reports
+`Vn_max_individual`, `Vn_max_group_per_wall`, and governing `Vn_max`.
+`alpha_sh` is 1.0 for a rectangular wall and otherwise
+`0.7(1 + sqrt(Acf/(bcf·bw)))`, bounded 1.0…1.2.
+
+For special walls the distributed minimum is `rho_l = rho_t = 0.0025` unless
+the §18.10.2.1 low-shear exception applies; other walls use Table 11.6.1 via
+`rho_min_distributed(..., special, db, fy)`. Two boundary-element bar curtains
+are valid (`n_x_be >= 2`); transverse reinforcement is controlled by the
+§18.10.6.4(f) and `hx` limits.
+
 ---
 
 ## 1. Quick start
