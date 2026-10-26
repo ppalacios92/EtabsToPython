@@ -32,6 +32,55 @@ def vc_simplified(*, b: float, d: float, concrete: Concrete) -> float:
     return 0.17 * concrete.lam * concrete.sqrt_fc * b * d / 1000.0
 
 
+def lambda_s(d: float) -> float:
+    """Size-effect factor for one-way shear, ACI 318-25 Eq. 22.5.5.1.3.
+
+    ``d`` is the effective depth in mm.  The ACI expression is limited to
+    one; non-positive depths retain that upper-bound value so callers with
+    incomplete geometry do not receive an artificial size-effect increase.
+    """
+    if d <= 0.0:
+        return 1.0
+    return min(sqrt(2.0 / (1.0 + d / 254.0)), 1.0)
+
+
+def vc_one_way(
+    *,
+    b: float,
+    d: float,
+    rho_w: float,
+    concrete: Concrete,
+    av_ge_av_min: bool,
+    Nu: float = 0.0,
+    Ag: float = 0.0,
+) -> float:
+    """Concrete one-way shear strength ``Vc`` per Table 22.5.5.1 [kN].
+
+    ``Nu`` is positive in compression and is capped at ``0.05 fc`` in the
+    additive axial-stress term.  With at least minimum transverse
+    reinforcement, the lesser of the two tabulated expressions governs;
+    otherwise the size-effect expression applies.  The result is bounded by
+    zero and by ``0.42 lambda sqrt(fc) b d``.  Units are MPa, mm and kN.
+    """
+    rho_term = max(rho_w, 0.0) ** (1.0 / 3.0)
+    nu_term = 0.0
+    if Nu > 0.0 and Ag > 0.0:
+        nu_term = min(Nu * 1000.0 / (6.0 * Ag), 0.05 * concrete.fc)
+
+    common = concrete.lam * concrete.sqrt_fc
+    if av_ge_av_min:
+        vc_stress = min(
+            0.17 * common + nu_term,
+            0.66 * rho_term * common + nu_term,
+        )
+    else:
+        vc_stress = 0.66 * lambda_s(d) * rho_term * common + nu_term
+
+    vc_n = vc_stress * b * d
+    vc_cap_n = 0.42 * common * b * d
+    return max(0.0, min(vc_n, vc_cap_n)) / 1000.0
+
+
 def vc_detailed(
     *,
     b: float,

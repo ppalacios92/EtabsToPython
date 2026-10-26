@@ -51,7 +51,7 @@ from design.common.materials import Bar, Concrete, Steel
 from design.common.units import UnitSystem, units_from, to_internal, DEFAULT_UNITS
 from design.common.element_base import ElementBase
 from design.common.shear import (
-    vc_simplified, vs_capacity, av_s_required, vc_zero_seismic,
+    vc_one_way, vs_capacity, av_s_required, av_s_minimum, vc_zero_seismic,
 )
 from design.common.spacing import (
     ash_required, s_max_confined_column, lo_length_column,
@@ -716,8 +716,8 @@ class Column(ElementBase):
         c   = self.section.concrete
         phi = phi_shear()
 
-        Vc_x = vc_simplified(b=h_out, d=d_x, concrete=c)
-        Vc_y = vc_simplified(b=b_out, d=d_y, concrete=c)
+        Vc_x = self._vc("x")
+        Vc_y = self._vc("y")
         Vs_x = (vs_capacity(Av=self.Av_y, fyt=self.fyt, d=d_x, s=self.s)
                 if (self.Av_y and self.s and self.s > 0) else 0.0)
         Vs_y = (vs_capacity(Av=self.Av_x, fyt=self.fyt, d=d_y, s=self.s)
@@ -728,6 +728,54 @@ class Column(ElementBase):
         self._phi_Vn = min(self._phi_Vn_x, self._phi_Vn_y)
 
         return self
+
+    def _vc(
+        self,
+        direction: str,
+        *,
+        Av: float | None = None,
+        s: float | None = None,
+    ) -> float:
+        """Table 22.5.5.1 ``Vc`` for one column shear direction.
+
+        The tension face is the bars with the largest coordinate along the
+        shear direction.  ``Av`` is the area of legs resisting that shear;
+        callers sizing a proposal pass its provided transverse area and
+        spacing explicitly.
+        """
+        b_out = self.section.width()
+        h_out = self.section.height()
+        if direction == "x":
+            bw, d, coordinate = h_out, 0.9 * b_out, "x"
+            Av_used = self.Av_y if Av is None else Av
+        elif direction == "y":
+            bw, d, coordinate = b_out, 0.9 * h_out, "y"
+            Av_used = self.Av_x if Av is None else Av
+        else:
+            raise ValueError(f"direction must be 'x' or 'y', got {direction!r}")
+
+        bars = list(self.section.rebar.iter_bars())
+        if bars:
+            face_coordinate = max(getattr(bar, coordinate) for bar, _ in bars)
+            As_tension = sum(
+                bar.area for bar, _ in bars
+                if abs(getattr(bar, coordinate) - face_coordinate) <= 1.0e-9
+            )
+        else:
+            As_tension = 0.0
+        rho_w = As_tension / (bw * d) if bw > 0.0 and d > 0.0 else 0.0
+        s_used = self.s if s is None else s
+        av_ge_av_min = bool(
+            Av_used > 0.0 and s_used is not None and s_used > 0.0
+            and Av_used / s_used >= av_s_minimum(
+                b=bw, concrete=self.section.concrete, fyt=self.fyt,
+            )
+        )
+        return vc_one_way(
+            b=bw, d=d, rho_w=rho_w, concrete=self.section.concrete,
+            av_ge_av_min=av_ge_av_min, Nu=0.0,
+            Ag=self.section.gross_area(),
+        )
 
     def _ensure_run(self) -> None:
         if self._surface is None:
@@ -1156,8 +1204,8 @@ class Column(ElementBase):
         # For Vy: bw = b (perpendicular to Y), d = 0.9·h
         d_x_pre = 0.9 * b_out
         d_y_pre = 0.9 * h_out
-        Vc_x_pre = vc_simplified(b=h_out, d=d_x_pre, concrete=c)
-        Vc_y_pre = vc_simplified(b=b_out, d=d_y_pre, concrete=c)
+        Vc_x_pre = self._vc("x")
+        Vc_y_pre = self._vc("y")
         av_s_req_x_for_pick: float | None = None
         av_s_req_y_for_pick: float | None = None
 
@@ -1251,8 +1299,8 @@ class Column(ElementBase):
         phi_v = phi_shear()
         d_x = 0.9 * b_out    # depth in X direction (for Vx)
         d_y = 0.9 * h_out    # depth in Y direction (for Vy)
-        Vc_x = vc_simplified(b=h_out, d=d_x, concrete=c)   # bw=h → resists Vx
-        Vc_y = vc_simplified(b=b_out, d=d_y, concrete=c)   # bw=b → resists Vy
+        Vc_x = self._vc("x", Av=av_prov_y, s=s_try)  # bw=h → resists Vx
+        Vc_y = self._vc("y", Av=av_prov_x, s=s_try)  # bw=b → resists Vy
 
         # ---- §18.7.6.2.1 — Vc = 0 in lo when light axial + seismic-dominated ----
         # For the column we treat the demand shear as "seismic" when the
@@ -1372,8 +1420,8 @@ class Column(ElementBase):
         # ============================================================ #
         # The shear demand is the SAME as in lo (Ve_x_used / Ve_y_used,
         # or |Vu| in demand mode), but Vc is restored (no §18.7.6.2.1).
-        Vc_x_mid = vc_simplified(b=h_out, d=d_x, concrete=c)
-        Vc_y_mid = vc_simplified(b=b_out, d=d_y, concrete=c)
+        Vc_x_mid = self._vc("x")
+        Vc_y_mid = self._vc("y")
         av_s_req_x_mid: float | None = None
         av_s_req_y_mid: float | None = None
         if mode == "demand" and demands is not None:
@@ -1402,6 +1450,8 @@ class Column(ElementBase):
         a_per_leg_mid = pi * chosen_db_mid ** 2 / 4.0
         av_prov_x_mid = n_x_mid * a_per_leg_mid
         av_prov_y_mid = n_y_mid * a_per_leg_mid
+        Vc_x_mid = self._vc("x", Av=av_prov_y_mid, s=s_middle)
+        Vc_y_mid = self._vc("y", Av=av_prov_x_mid, s=s_middle)
         Vs_x_prov_mid = vs_capacity(Av=av_prov_y_mid, fyt=self.fyt, d=d_x, s=s_middle)
         Vs_y_prov_mid = vs_capacity(Av=av_prov_x_mid, fyt=self.fyt, d=d_y, s=s_middle)
         phi_Vn_x_mid = phi_v * (Vc_x_mid + Vs_x_prov_mid)
@@ -1569,8 +1619,7 @@ class Column(ElementBase):
     # Back-compat: scalar version (peraltes = altura, conservador)
     def _av_s_required_for(self, Vu: float) -> float | None:
         d = 0.9 * self.section.height()
-        b = self.section.width()
-        Vc = vc_simplified(b=b, d=d, concrete=self.section.concrete)
+        Vc = self._vc("y")
         return self._av_s_required_for_direction(Vu=Vu, Vc=Vc, d=d)
 
     # ---- internal: count longitudinal bars per face ----

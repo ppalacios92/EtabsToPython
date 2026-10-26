@@ -57,7 +57,7 @@ from design.common.bar_schedule import BarSchedule
 from design.common.factors import phi_shear, phi_axial_flexure
 from design.common.materials import Bar, Concrete, Steel
 from design.common.shear import (
-    vc_simplified, vs_capacity, av_s_required as _av_s_required_common,
+    vc_one_way, vs_capacity, av_s_required as _av_s_required_common,
     av_s_minimum, vc_zero_seismic,
 )
 from design.common.spacing import (
@@ -704,15 +704,39 @@ class Beam(ElementBase):
         return phi * Mn
 
     def _compute_phi_Vn(self) -> float:
-        """phi*Vn from Vc + Vs (simplified §22.5) using common helpers."""
+        """phi*Vn from Table 22.5.5.1 ``Vc`` plus ``Vs``."""
         d, _, _, _ = self._depths()
-        bw = self.section.width()
-        c = self.section.concrete
-        Vc = vc_simplified(b=bw, d=d, concrete=c)
+        Vc = self._vc_one_way(d=d)
         Vs = 0.0
         if self.Av > 0 and self.s and self.s > 0:
             Vs = vs_capacity(Av=self.Av, fyt=self.fyt, d=d, s=self.s)
         return phi_shear() * (Vc + Vs)
+
+    def _vc_one_way(
+        self,
+        *,
+        d: float | None = None,
+        Av: float | None = None,
+        s: float | None = None,
+    ) -> float:
+        """Table 22.5.5.1 ``Vc`` for positive bending (bottom tension)."""
+        if d is None:
+            d, _, _, _ = self._depths()
+        bw = self.section.width()
+        As_tension = self._As_in_layer("bot")
+        rho_w = As_tension / (bw * d) if bw > 0.0 and d > 0.0 else 0.0
+        Av_used = self.Av if Av is None else Av
+        s_used = self.s if s is None else s
+        av_ge_av_min = bool(
+            Av_used > 0.0 and s_used is not None and s_used > 0.0
+            and Av_used / s_used >= av_s_minimum(
+                b=bw, concrete=self.section.concrete, fyt=self.fyt,
+            )
+        )
+        return vc_one_way(
+            b=bw, d=d, rho_w=rho_w, concrete=self.section.concrete,
+            av_ge_av_min=av_ge_av_min,
+        )
 
     def _mpr(self, *, direction: str) -> float:
         """Mpr closed form for one bending sense — §18.6.5.1."""
@@ -977,9 +1001,7 @@ class Beam(ElementBase):
         if Vu is None or Vu <= 0:
             return None
         d, _, _, _ = self._depths()
-        bw = self.section.width()
-        c = self.section.concrete
-        Vc = 0.0 if vc_zero else vc_simplified(b=bw, d=d, concrete=c)
+        Vc = 0.0 if vc_zero else self._vc_one_way(d=d)
         return _av_s_required_common(
             Vu=Vu, Vc=Vc, fyt=self.fyt, d=d, phi=phi_shear(),
         )
@@ -1165,7 +1187,7 @@ class Beam(ElementBase):
         two_bot_ok = chosen_n_bot >= 2
 
         # ---- phi_Vn provided by the proposed stirrups (use chosen_s) ----
-        Vc = vc_simplified(b=bw, d=d_pos, concrete=c)
+        Vc = self._vc_one_way(d=d_pos, Av=av_prov, s=chosen_s)
         Vs_prov = vs_capacity(Av=av_prov, fyt=self.fyt, d=d_pos, s=chosen_s)
         phi_Vn_prov = phi_shear() * (Vc + Vs_prov)
 

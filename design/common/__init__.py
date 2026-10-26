@@ -26,6 +26,8 @@ from design.common.units import (
 # --- shear ---
 from design.common.shear import (
     vc_simplified,
+    lambda_s,
+    vc_one_way,
     vc_detailed,
     vs_capacity,
     vs_max,
@@ -82,7 +84,7 @@ __all__ = [
     # codes / units
     "ACI", "UnitSystem", "units_from", "to_internal", "DEFAULT_UNITS",
     # shear
-    "vc_simplified", "vc_detailed", "vs_capacity", "vs_max",
+    "vc_simplified", "lambda_s", "vc_one_way", "vc_detailed", "vs_capacity", "vs_max",
     "av_s_required", "av_s_minimum", "vc_zero_seismic",
     "alpha_c", "vn_wall", "vn_wall_max", "ve_in_plane_capacity_wall",
     # spacing
