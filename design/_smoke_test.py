@@ -33,6 +33,7 @@ from design.sections.reinforcement import (
 )
 from design.walls.coupling_beam import CouplingBeam
 from design.walls.wall_pier import WallPier
+from design.joints.joint import BeamColumnJoint, FramingBeam, JointDemands
 
 
 HEADER = "=" * 60
@@ -49,13 +50,15 @@ def test_beam():
     banner("BEAM — flexure + shear, three-mode design, SMF Ve")
     c = Concrete(fc=28)
     s = Steel(fy=420, grade=60)
+    # Geometry inputs are canonical mm (coherent with the common/ equations);
+    # units=6 (kN_m_C) is PRESENTATION ONLY — summary() displays in kN, m, kN·m.
     beam = Beam.rectangular(
         bw=300, h=600, cover=40,
         concrete=c, steel=s,
         n_top=2, db_top=20,
         n_bot=4, db_bot=20,
         db_stirrup=10, n_legs=2, s_stirrup=150,
-        ln=5.0, seismic=True, Vg=80.0,
+        ln=5000, seismic=True, Vg=80.0,
         units=6, label="B-1",
     )
 
@@ -137,7 +140,7 @@ def test_column(plot_dir: Path | None = None, *,
           f" ({p.n_legs_y} legs φ{p.db_hoop:.0f})")
     if results.capacity.Ve_capacity:
         print(f"  Ve_capacity    = {results.capacity.Ve_capacity:.0f} kN  "
-              f"(Mpr_top = {results.capacity.Mpr_top:.0f} kN·m)")
+              f"(Mpr_x = {results.capacity.Mpr_x:.0f} kN·m)")
     print(f"  lo (confined)  = {p.lo:.0f} mm   hx_ok = {p.hx_ok}")
 
     if plot_dir is not None:
@@ -252,6 +255,76 @@ def test_coupling_and_pier():
 
 
 # ----------------------------------------------------------------- #
+# BEAM-COLUMN JOINT — §18.8 / §15.5.2
+# ----------------------------------------------------------------- #
+def test_joint():
+    banner("BEAM-COLUMN JOINT — interior & exterior, eccentric beam")
+    c = Concrete(fc=35)
+    s = Steel(fy=420, grade=60)
+
+    def make_column(label: str) -> Column:
+        group = perimeter_bars(b=600, h=600, cover=50, n_x=4, n_y=4,
+                               bar=Bar(diameter=25), steel=s)
+        sec = RectangularSection(b=600, h=600, concrete=c,
+                                 rebar=RebarLayout(groups=(group,)))
+        return Column(section=sec, lu=3000.0, k=1.0, Av=2 * 71.0,
+                      fyt=420, s=100, seismic=True, hx=180.0, label=label)
+
+    def make_beam(label: str) -> Beam:
+        return Beam.rectangular(
+            bw=350, h=600, cover=40, concrete=c, steel=s,
+            n_top=4, db_top=22, n_bot=3, db_bot=22,
+            db_stirrup=10, n_legs=2, s_stirrup=100,
+            ln=6000, seismic=True, Vg=60.0, units=6, label=label,
+        )
+
+    # --- Interior joint: four beams, column above & below ---
+    bx, by = make_beam("Bx"), make_beam("By")
+    interior = BeamColumnJoint(
+        col_above=make_column("C-top"), col_below=make_column("C-bot"),
+        beam_left=FramingBeam(bx), beam_right=FramingBeam(bx),
+        beam_up=FramingBeam(by), beam_down=FramingBeam(by),
+        moment_condition="P0", probable=True, label="J-interior",
+    ).run()
+    interior.summary()
+
+    # --- Exterior joint: only left + right beams, roof (no column above) ---
+    print()
+    exterior = BeamColumnJoint(
+        col_below=make_column("C-bot"),
+        beam_left=FramingBeam(make_beam("Bx")),
+        moment_condition="P0", probable=True, label="J-exterior-roof",
+    ).run()
+    exterior.summary()
+
+    # --- Eccentric beam: 120 mm offset (> b_c/8 = 75 mm) ---
+    print()
+    ecc = BeamColumnJoint(
+        col_above=make_column("C-top"), col_below=make_column("C-bot"),
+        beam_left=FramingBeam(make_beam("Bx"), eccentricity=120.0),
+        beam_right=FramingBeam(make_beam("Bx"), eccentricity=120.0),
+        label="J-eccentric",
+    ).run()
+    ecc.summary()
+
+    # --- Detailing proposal + manual demand override ---
+    print()
+    prop = interior.design().envelope
+    print("  --- design (interior) ---")
+    print(f"  min depth X/Y  = {prop.min_depth_x:.0f} / {prop.min_depth_y:.0f} mm"
+          f"   provided {prop.depth_provided_x:.0f} / {prop.depth_provided_y:.0f} mm"
+          f"   ok={prop.depth_ok}")
+    print(f"  ldh required   = {prop.ldh_required:.0f} mm")
+    print(f"  hoop s_max     = {prop.s_max_confined:.0f} mm   "
+          f"Ash relief={prop.ash_reduction}")
+    chk = interior.check(JointDemands(Vu_x=2500.0))
+    print(f"  override Vu_x=2500 kN -> ratio X={chk.x.ratio:.2f} "
+          f"passed={chk.passed}")
+
+    print(f"  report keys    = {sorted(interior.report())}")
+
+
+# ----------------------------------------------------------------- #
 # Plot helpers (only when --plot)
 # ----------------------------------------------------------------- #
 def _plot_column(col, cap, plot_dir: Path) -> None:
@@ -345,6 +418,7 @@ def main() -> None:
     test_column(plot_dir=plot_dir, n_angles=args.angles, n_points=args.points)
     test_wall(plot_dir=plot_dir, n_angles=args.angles, n_points=args.points)
     test_coupling_and_pier()
+    test_joint()
 
     banner("DONE")
     if plot_dir is not None:

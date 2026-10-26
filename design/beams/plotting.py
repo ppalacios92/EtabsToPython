@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 
-from design.beams.style import BeamPlotStyle
+from design.common.plot_style import PlotStyle as BeamPlotStyle
 
 if TYPE_CHECKING:
     from design.beams.beam import Beam, BeamDemands
@@ -30,6 +30,42 @@ class _BeamPlotter:
     def __init__(self, beam: "Beam") -> None:
         self._beam = beam
         self.style = BeamPlotStyle()
+
+    # ---- P-M curve (inspection) ----
+    def pm(self, *, direction: str = "both", ax=None, **kw):
+        """Plot the bidirectional P-M curve (strain-compatibility).
+
+        direction: 'pos' | 'neg' | 'both' (default).
+        """
+        import matplotlib.pyplot as plt
+        s = self.style
+        if ax is None:
+            _, ax = plt.subplots(figsize=s.figsize_2d)
+        units = self._beam.units
+        pm = self._beam.pm
+
+        if direction in ("pos", "both"):
+            d = pm.diagram("pos")
+            ax.plot(d.phi_Mn * units.moment_factor,
+                    d.phi_Pn * units.force_factor,
+                    color=getattr(s, "color_pos", "tab:blue"),
+                    lw=s.linewidth,
+                    label=r"$+M$ (tension at bottom)")
+        if direction in ("neg", "both"):
+            d = pm.diagram("neg")
+            ax.plot(-d.phi_Mn * units.moment_factor,
+                    d.phi_Pn * units.force_factor,
+                    color=getattr(s, "color_neg", "tab:red"),
+                    lw=s.linewidth,
+                    label=r"$-M$ (tension at top)")
+        ax.axhline(0, color="gray", lw=0.5)
+        ax.axvline(0, color="gray", lw=0.5)
+        ax.set_xlabel(f"Moment ({units.force}.{units.length})")
+        ax.set_ylabel(f"Axial ({units.force}, + compression)")
+        ax.set_title(f"Beam P-M curve  ({units.name})")
+        ax.grid(True, alpha=s.grid_alpha)
+        ax.legend(fontsize=9)
+        return ax
 
     # ---- geometry ----
     def section(self, *, ax=None, show_bar_labels: bool = False,
@@ -46,6 +82,7 @@ class _BeamPlotter:
             bar_scale=bar_scale if bar_scale is not None else s.bar_scale,
             concrete_color=s.color_concrete,
             rebar_color=s.color_rebar,
+            units=self._beam.units,
             **kw,
         )
 
@@ -76,7 +113,7 @@ class _BeamPlotter:
                    label=r"$\phi M_n^-$")
         ax.set_xticks(x)
         ax.set_xticklabels(["face i", "mid", "face j"])
-        ax.set_ylabel(f"Moment ({units.force}·{units.length})")
+        ax.set_ylabel(f"Moment ({units.moment_label})")
         ax.set_title(f"Moment demand per station  ({units.name})")
         ax.grid(True, alpha=s.grid_alpha, axis="y")
         ax.legend(fontsize=9)
@@ -100,8 +137,8 @@ class _BeamPlotter:
         ax.axhline(cap.phi_Vn * units.force_factor,
                    color="k", lw=s.linewidth_cap, ls=s.linestyle_cap,
                    label=r"$\phi V_n$")
-        if cap.Mn_pr_pos is not None and cap.Mn_pr_neg is not None and self._beam.ln:
-            Ve = (max(cap.Mn_pr_pos, cap.Mn_pr_neg) * 2) / self._beam.ln + self._beam.Vg
+        if cap.Mpr_pos is not None and cap.Mpr_neg is not None and self._beam.ln:
+            Ve = (max(cap.Mpr_pos, cap.Mpr_neg) * 2) / self._beam.ln + self._beam.Vg
             ax.axhline(Ve * units.force_factor, color="tab:purple",
                        lw=s.linewidth_cap, ls=":",
                        label=r"$V_e$ (capacity)")
@@ -133,14 +170,14 @@ class _BeamPlotter:
                 color=s.color_pos, alpha=0.7, label=r"$\phi M_n^+$")
         ax2.bar([1], [cap.phi_Mn_neg * u.moment_factor], 0.5,
                 color=s.color_neg, alpha=0.7, label=r"$\phi M_n^-$")
-        if cap.Mn_pr_pos is not None:
-            ax2.bar([0], [cap.Mn_pr_pos * u.moment_factor], 0.5,
+        if cap.Mpr_pos is not None:
+            ax2.bar([0], [cap.Mpr_pos * u.moment_factor], 0.5,
                     color=s.color_pos, alpha=0.25, label=r"$M_{pr}^+$")
-            ax2.bar([1], [cap.Mn_pr_neg * u.moment_factor], 0.5,
+            ax2.bar([1], [cap.Mpr_neg * u.moment_factor], 0.5,
                     color=s.color_neg, alpha=0.25, label=r"$M_{pr}^-$")
         ax2.set_xticks([0, 1])
         ax2.set_xticklabels(["+M", "-M"])
-        ax2.set_ylabel(f"Moment ({u.force}·{u.length})")
+        ax2.set_ylabel(f"Moment ({u.moment_label})")
         ax2.set_title("Beam capacity")
         ax2.grid(True, alpha=s.grid_alpha, axis="y")
         ax2.legend(fontsize=9)

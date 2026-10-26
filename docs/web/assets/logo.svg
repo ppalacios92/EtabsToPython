@@ -1,0 +1,14 @@
+<!-- EtabsToPython mark — a reinforced-concrete moment frame (portal):
+     two columns + a beam over a ground line, inside a ring.
+     Light variant: ring in rebar amber (accent2), frame in steel blue (accent). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none" aria-label="EtabsToPython mark">
+  <circle cx="50" cy="50" r="46" stroke="#c8772e" stroke-width="3"/>
+  <!-- portal frame: columns + beam -->
+  <path d="M30 78 L30 32 L70 32 L70 78"
+        stroke="#1f6fb2" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- ground / footing line -->
+  <path d="M20 78 L80 78" stroke="#1f6fb2" stroke-width="4" stroke-linecap="round"/>
+  <!-- lateral load arrow at the beam -->
+  <path d="M16 26 L30 26 M26 22 L30 26 L26 30"
+        stroke="#c8772e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

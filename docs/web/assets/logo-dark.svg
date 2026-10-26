@@ -1,0 +1,10 @@
+<!-- EtabsToPython mark — dark variant. Same paths, strokes in the
+     dark-mode accents (brightened steel blue + warm rebar amber). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none" aria-label="EtabsToPython mark">
+  <circle cx="50" cy="50" r="46" stroke="#e0954a" stroke-width="3"/>
+  <path d="M30 78 L30 32 L70 32 L70 78"
+        stroke="#4fa3dd" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M20 78 L80 78" stroke="#4fa3dd" stroke-width="4" stroke-linecap="round"/>
+  <path d="M16 26 L30 26 M26 22 L30 26 L26 30"
+        stroke="#e0954a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

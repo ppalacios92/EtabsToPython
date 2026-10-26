@@ -24,9 +24,9 @@ and phi = 1.0.
 Internal units (per ``design/AGENTS.md``):
     Stress  MPa,  Length  mm,  Force  kN,  Moment  kN·m,  Area  mm².
 
-``ln`` is stored in **mm**. ``Beam.rectangular(ln=...)`` accepts metres
-as a convenience (heuristic ``ln < 30``) and converts with a
-``DeprecationWarning``. ``beam.ln_m`` is a read-only view in metres.
+``ln`` is canonical **mm**, like all geometry. ``units=`` is PRESENTATION
+ONLY — it never reinterprets the inputs (AGENTS.md §1). ``beam.ln_m`` is a
+read-only view in metres.
 
 ACI 318-25 sections used:
     §9.3.1     h_min for beams (Table 9.3.1.1)
@@ -47,7 +47,6 @@ ACI 318-25 sections used:
     §25.2      bar spacing limits
 """
 from __future__ import annotations
-import warnings
 from dataclasses import dataclass
 from math import ceil, pi
 from typing import Optional
@@ -65,7 +64,8 @@ from design.common.spacing import (
     s_max_seismic_smf_beam as s_max_seismic_smf,
     s_max_seismic_outside_beam as s_max_seismic_outside,
 )
-from design.common.units import UnitSystem, units_from, DEFAULT_UNITS
+from design.common.units import UnitSystem, units_from, to_internal, DEFAULT_UNITS
+from design.common.element_base import ElementBase
 from design.sections.base import Section
 from design.sections.rectangular import RectangularSection
 from design.sections.reinforcement import Rebar, RebarGroup, RebarLayout
@@ -77,6 +77,8 @@ from design.beams.flexure import (
 from design.beams.seismic import (
     mpr as mpr_closed_form, v_seismic_from_mpr,
 )
+from design.beams.interaction import BeamPMCurve, beam_pm_curve
+from design.beams.proxies import _BeamFieldView
 from design.beams.plotting import _BeamPlotter
 
 
@@ -130,9 +132,6 @@ class BeamCapacity:
 
     Canonical names per ``design/AGENTS.md`` §2:
         ``Mpr_pos`` / ``Mpr_neg``   — probable moment (§18.6.5.1).
-
-    Legacy aliases ``Mn_pr_pos`` / ``Mn_pr_neg`` are exposed as
-    read-only properties.
     """
     phi_Mn_pos: float            # kN·m
     phi_Mn_neg: float
@@ -146,17 +145,6 @@ class BeamCapacity:
     rho_balanced: float = 0.0    # ACI §22.2 balanced ratio
     rho_max_aci_smf: float = 0.0 # §18.6.3.1 (informative)
     tension_controlled: bool = True
-
-    # ---- Legacy aliases (back-compat) ----
-    @property
-    def Mn_pr_pos(self) -> Optional[float]:
-        """Legacy alias for :attr:`Mpr_pos` — prefer ``Mpr_pos``."""
-        return self.Mpr_pos
-
-    @property
-    def Mn_pr_neg(self) -> Optional[float]:
-        """Legacy alias for :attr:`Mpr_neg` — prefer ``Mpr_neg``."""
-        return self.Mpr_neg
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +167,10 @@ class BeamCheck:
     tc_ok:           bool
     smf_continuity_ok: bool
     passed:          bool
+    # Steel quantities (kg/m³ of concrete) — populated by check()
+    rho_long:  float = 0.0
+    rho_trans: float = 0.0
+    rho_total: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,7 +256,7 @@ class BeamDesignResults:
 # ---------------------------------------------------------------- #
 # Beam class
 # ---------------------------------------------------------------- #
-class Beam:
+class Beam(ElementBase):
     """Reinforced concrete beam, autocontained.
 
     Internal numerics: MPa, mm, kN, kN·m.
@@ -321,6 +313,7 @@ class Beam:
         self.bar_schedule = bar_schedule if bar_schedule is not None else BarSchedule()
 
         self._plotter: Optional[_BeamPlotter] = None
+        self._pm_curve: Optional[BeamPMCurve] = None
         self.design_results: Optional[BeamDesignResults] = None
 
         # Lazy caches — populated by .run()
@@ -335,12 +328,12 @@ class Beam:
     # =============================================================== #
     @property
     def ln_m(self) -> float:
-        """Clear span in **metres** (legacy view over the canonical mm value)."""
+        """Clear span in metres (read-only view; self.ln is canonical mm)."""
         return self.ln / 1000.0
 
     @property
     def _ln_m(self) -> float:
-        """Clear span in metres — internal helper for kN·m / m = kN math."""
+        """ln in metres for the Mpr/ln shear math (kN·m / m = kN)."""
         return self.ln / 1000.0
 
     # =============================================================== #
@@ -399,20 +392,19 @@ class Beam:
         # Accept legacy `s` alias
         s_val = s_stirrup if s_stirrup is not None else kwargs.pop("s", None)
 
-        # Heuristic m -> mm conversion (canonical unit is mm per AGENTS.md §1).
-        # If ln < 30 we assume the caller passed metres (legacy convention) and
-        # convert, emitting a DeprecationWarning. Direct Beam.__init__ callers
-        # are expected to pass mm already.
-        if ln is not None and ln < 30.0:
-            import warnings
-            warnings.warn(
-                f"Beam.rectangular(ln={ln}) looks like metres; converting to "
-                f"{ln * 1000.0:.0f} mm. Pass mm directly to silence this warning.",
-                DeprecationWarning, stacklevel=2,
-            )
-            ln_mm = float(ln) * 1000.0
-        else:
-            ln_mm = float(ln) if ln is not None else 0.0
+        # ---- `units` is PRESENTATION ONLY ----
+        # Every scalar input is canonical, coherent with the common/ equations:
+        # section dimensions and bar diameters in mm, Vg in kN, ln in mm. The
+        # `units` argument NEVER reinterprets the geometry — it only governs how
+        # summary()/report()/plots DISPLAY the results. Change it any time with
+        # beam.set_units(...).
+        u = (units if isinstance(units, UnitSystem)
+             else units_from(units) if units is not None
+             else DEFAULT_UNITS)
+
+        # ln is canonical mm, like all geometry. No magnitude heuristic
+        # (AGENTS.md §1): the unit system is explicit, never auto-detected.
+        ln_mm = float(ln)
 
         rebar = _build_beam_rebar(
             bw=bw, h=h, cover=cover, db_stirrup=db_stirrup,
@@ -429,16 +421,55 @@ class Beam:
             section=section, ln=ln_mm, cover=cover, db_stirrup=db_stirrup,
             Av=Av, s=s_val,
             Vg=Vg, seismic=seismic, steel_transverse=steel_transverse,
-            units=units, bar_schedule=bar_schedule, label=label,
+            units=u, bar_schedule=bar_schedule, label=label,
             **kwargs,
         )
 
     # =============================================================== #
     # Configuration helpers
     # =============================================================== #
-    def set_units(self, code_or_name: int | str) -> "Beam":
-        self.units = units_from(code_or_name)
-        return self
+    def demands(
+        self,
+        *,
+        Mu_pos_i: float = 0.0, Mu_neg_i: float = 0.0, Vu_i: float = 0.0,
+        Mu_pos_mid: float = 0.0, Mu_neg_mid: float = 0.0, Vu_mid: float = 0.0,
+        Mu_pos_j: float = 0.0, Mu_neg_j: float = 0.0, Vu_j: float = 0.0,
+        Vg_i: float | None = None, Vg_mid: float | None = None,
+        Vg_j: float | None = None,
+        units: int | str | UnitSystem | None = None,
+    ) -> "BeamDemands":
+        """Build a :class:`BeamDemands` from values in display units.
+
+        Moments (``Mu_*``) and shears (``Vu_*``, ``Vg_*``) are read in
+        ``units`` (defaults to this beam's ``self.units``) and converted to
+        internal kN·m / kN. Pass ``units=`` to override for one call.
+        """
+        u = (units if isinstance(units, UnitSystem)
+             else units_from(units) if units is not None
+             else self.units)
+
+        def _M(x):
+            return to_internal("moment", x, units=u)
+
+        def _V(x):
+            return None if x is None else to_internal("force", x, units=u)
+
+        return BeamDemands(
+            Mu_pos_i=_M(Mu_pos_i), Mu_neg_i=_M(Mu_neg_i), Vu_i=_V(Vu_i),
+            Mu_pos_mid=_M(Mu_pos_mid), Mu_neg_mid=_M(Mu_neg_mid), Vu_mid=_V(Vu_mid),
+            Mu_pos_j=_M(Mu_pos_j), Mu_neg_j=_M(Mu_neg_j), Vu_j=_V(Vu_j),
+            Vg_i=_V(Vg_i), Vg_mid=_V(Vg_mid), Vg_j=_V(Vg_j),
+        )
+
+    def run_optimize(self, demands: "BeamDemands | None" = None, **kwargs):
+        """Sweep detailing alternatives ranked by steel weight.
+
+        Method form for parity with ``Column.run_optimize`` /
+        ``Wall.run_optimize``; delegates to
+        :func:`design.beams.optimize.run_optimize`.
+        """
+        from design.beams.optimize import run_optimize as _run_optimize
+        return _run_optimize(self, demands, **kwargs)
 
     @property
     def steel(self) -> Steel:
@@ -489,10 +520,6 @@ class Beam:
             Vg=self.Vg, steel_transverse=self._steel_transverse,
             units=self.units, bar_schedule=self.bar_schedule, label=self.label,
         )
-
-    def apply(self, proposal: BeamDesignProposal) -> "Beam":
-        """Alias of :meth:`evolve` — returns a NEW Beam (immutable)."""
-        return self.evolve(proposal)
 
     # =============================================================== #
     # Lazy run + cached capacity properties
@@ -771,6 +798,17 @@ class Beam:
         passed = (r_M_overall <= 1.0 and r_V_overall <= 1.0 and rho_ok and
                   (cap.tension_controlled if self.seismic else True) and
                   smf_ok)
+        # Steel quantities (kg/m³)
+        from design.beams.optimize import (
+            longitudinal_steel_quantity, transverse_steel_quantity,
+        )
+        rho_long  = longitudinal_steel_quantity(self)
+        rho_trans = 0.0
+        if self.db_stirrup and self.s and self.s > 0:
+            rho_trans = transverse_steel_quantity(
+                self, db_stirrup=self.db_stirrup,
+                n_legs=self._current_n_legs(), spacing=self.s,
+            )
         return BeamCheck(
             capacity=cap, demands=demands,
             ratio_M_pos_i=r_pos_i, ratio_M_neg_i=r_neg_i,
@@ -783,6 +821,9 @@ class Beam:
             tc_ok=cap.tension_controlled,
             smf_continuity_ok=smf_ok,
             passed=passed,
+            rho_long=rho_long,
+            rho_trans=rho_trans,
+            rho_total=rho_long + rho_trans,
         )
 
     # =============================================================== #
@@ -885,13 +926,29 @@ class Beam:
             if av_s_required <= 0:
                 return db, 2, s_target
             n_req = max(2, ceil(av_s_required * s_target / a))
-            if n_req <= 6:
+            if n_req <= self._max_legs(db):
                 return db, n_req, s_target
-        # Fallback: largest hoop diameter, even if n_legs > 6
+        # Fallback: largest hoop diameter, capped by the geometric leg limit.
         db = max(self.bar_schedule.hoops)
         a = pi * db ** 2 / 4.0
         n = max(2, ceil(av_s_required * s_target / a)) if av_s_required > 0 else 2
+        n = min(n, self._max_legs(db))
         return db, n, s_target
+
+    def _max_legs(self, db_stirrup: float, s_horiz_max: float = 350.0) -> int:
+        """Max number of vertical hoop legs that fit across the width.
+
+        Crossties/legs must not be spaced wider than ``s_horiz_max`` along
+        the section width (the supported-bar spacing limit hx, analogous to
+        §25.7.2.3 — 350 mm for the SMF confinement detailing). With the
+        first and last legs riding the closed hoop corners, the number of
+        legs is bounded by ``1 + floor((bw - 2*cover - db_e) / s_horiz_max)``.
+        """
+        bw = self.section.width()
+        clear = bw - 2.0 * self.cover - db_stirrup
+        if clear <= 0:
+            return 2
+        return max(2, 1 + int(clear / s_horiz_max))
 
     def _resolve_vg(self, demands: BeamDemands | None
                     ) -> tuple[float, float, float]:
@@ -986,22 +1043,27 @@ class Beam:
         # §18.6.3.3: As_bot >= 0.5 As_top  (rebar is continuous)
         if self.seismic and As_bot_cont_req < 0.5 * As_top_cont_req:
             As_bot_cont_req = 0.5 * As_top_cont_req
-            notes.append("§18.6.3.3 — As_bot raised to 0.5 As_top.")
+            notes.append("Sec.18.6.3.3 -- As_bot raised to 0.5 As_top.")
 
         # Warn if the required As exceeds rho_max·bw·d (= 0.5·rho_b·bw·d)
         if As_top_cont_req > As_max:
             notes.append(
-                f"As_top required {As_top_cont_req:.0f} mm² exceeds rho_max·bw·d = "
-                f"{As_max:.0f} mm² (rho_max = 0.5·rho_b = {rho_max:.4f}). "
+                f"As_top required {As_top_cont_req:.0f} mm^2 exceeds rho_max*bw*d = "
+                f"{As_max:.0f} mm^2 (rho_max = 0.5*rho_b = {rho_max:.4f}). "
                 f"Consider larger section or compression steel."
             )
         if As_bot_cont_req > As_max:
             notes.append(
-                f"As_bot required {As_bot_cont_req:.0f} mm² exceeds rho_max·bw·d = "
-                f"{As_max:.0f} mm² (rho_max = 0.5·rho_b = {rho_max:.4f})."
+                f"As_bot required {As_bot_cont_req:.0f} mm^2 exceeds rho_max*bw*d = "
+                f"{As_max:.0f} mm^2 (rho_max = 0.5*rho_b = {rho_max:.4f})."
             )
 
         # ---- s_max in confined zone (§18.6.4.4) ----
+        # PROVISIONAL s_conf: uses the constructor default db_long_min only
+        # as a starting spacing target to size the stirrup db/n_legs. The
+        # real §18.6.4.4(c) limit (6*db_long, Gr60) depends on the SMALLEST
+        # LONGITUDINAL bar actually adopted below, so s_conf is recomputed
+        # after _pick_longitudinal with db_long_real = min(db_top, db_bot).
         if self.seismic:
             s_conf = s_max_seismic_smf(
                 d=d_pos, db_long_min=self.db_long_min,
@@ -1045,12 +1107,12 @@ class Beam:
             if cond_a and cond_b:
                 vc_zero = True
                 notes.append(
-                    f"§18.6.5.2 — Vc = 0 in lo "
-                    f"(seismic share = {seismic_share*100:.0f}% of Ve, Pu ≈ 0)."
+                    f"Sec.18.6.5.2 -- Vc = 0 in lo "
+                    f"(seismic share = {seismic_share*100:.0f}% of Ve, Pu ~ 0)."
                 )
             else:
                 notes.append(
-                    f"§18.6.5.2 — Vc retained "
+                    f"Sec.18.6.5.2 -- Vc retained "
                     f"(seismic share = {seismic_share*100:.0f}% of Ve, < 50%)."
                 )
 
@@ -1063,11 +1125,6 @@ class Beam:
         )
         a_per_leg = pi * chosen_db_stirrup ** 2 / 4.0
         av_prov = chosen_n_legs * a_per_leg
-        if chosen_s < s_conf - 1e-6:
-            notes.append(
-                f"Spacing tightened to {chosen_s:.0f} mm "
-                f"(below §18.6.4.4 cap of {s_conf:.0f} mm) to satisfy Av/s demand."
-            )
 
         # ---- pick longitudinal bars ----
         chosen_db_top, chosen_n_top = self._pick_longitudinal(
@@ -1078,6 +1135,30 @@ class Beam:
         )
         As_top_provided = chosen_n_top * pi * chosen_db_top ** 2 / 4.0
         As_bot_provided = chosen_n_bot * pi * chosen_db_bot ** 2 / 4.0
+
+        # §18.6.4.4(c): the confined-zone hoop spacing limit 6*db_long uses
+        # the SMALLEST PRIMARY LONGITUDINAL bar actually placed (Gr60; the
+        # common helper applies factor 5 for Gr80+). Recompute s_conf with
+        # the real adopted bars (not the fixed constructor db_long_min), then
+        # re-derive the stirrup spacing against this corrected cap.
+        if self.seismic:
+            db_long_real = min(chosen_db_top, chosen_db_bot)
+            s_conf = s_max_seismic_smf(
+                d=d_pos, db_long_min=db_long_real,
+                db_hoop=chosen_db_stirrup,
+                grade=s_steel.grade,
+            )
+            chosen_db_stirrup, chosen_n_legs, chosen_s = self._pick_stirrup(
+                av_s_req, s_conf, db_stirrup, n_legs,
+            )
+            a_per_leg = pi * chosen_db_stirrup ** 2 / 4.0
+            av_prov = chosen_n_legs * a_per_leg
+
+        if chosen_s < s_conf - 1e-6:
+            notes.append(
+                f"Spacing tightened to {chosen_s:.0f} mm "
+                f"(below Sec.18.6.4.4 cap of {s_conf:.0f} mm) to satisfy Av/s demand."
+            )
 
         # §18.6.3.2: at least two bars continuous top/bottom
         two_top_ok = chosen_n_top >= 2
@@ -1188,6 +1269,40 @@ class Beam:
         )
 
     # =============================================================== #
+    # P-M curve and result-view proxies (strain-compatibility kernel)
+    # =============================================================== #
+    @property
+    def pm(self) -> BeamPMCurve:
+        """Bidirectional P-M curve (built once, cached).
+
+        Use this for inspection-grade Mn at any Nu (closed-form is faster
+        but assumes Nu = 0). Invalidated when `apply()` or
+        `clear_cache()` is called.
+        """
+        if self._pm_curve is None:
+            self._pm_curve = beam_pm_curve(self.section, n_points=60)
+        return self._pm_curve
+
+    def clear_cache(self) -> None:
+        self._pm_curve = None
+
+    @property
+    def Mn(self) -> _BeamFieldView:
+        return _BeamFieldView(self, "Mn")
+
+    @property
+    def phi_Mn(self) -> _BeamFieldView:
+        return _BeamFieldView(self, "phi_Mn")
+
+    @property
+    def Pn(self) -> _BeamFieldView:
+        return _BeamFieldView(self, "Pn")
+
+    @property
+    def phi_Pn(self) -> _BeamFieldView:
+        return _BeamFieldView(self, "phi_Pn")
+
+    # =============================================================== #
     # Plot proxy
     # =============================================================== #
     @property
@@ -1201,32 +1316,27 @@ class Beam:
     # =============================================================== #
     # ---- formatting helpers (sensitive to the active unit system) ----
     def _fmt_len(self, mm_value: float) -> str:
-        """Format a length value (internally mm) in the user's units."""
-        u = self.units
-        val = mm_value * u.length_factor
-        if u.length == "m":   return f"{val:.3f}"
-        if u.length == "cm":  return f"{val:.1f}"
-        if u.length == "in":  return f"{val:.2f}"
-        if u.length == "ft":  return f"{val:.3f}"
-        return f"{val:.0f}"
+        """Format a length value (internally mm) as a BARE number.
+
+        Callers append the unit label (`u.length`). Delegates to the
+        shared presentation formatter so all elements render identically.
+        """
+        return self.units.fmt_length(mm_value, unit=False)
 
     def _fmt_area(self, mm2_value: float) -> str:
-        """Format an area value (internally mm²) in the user's units."""
-        u = self.units
-        val = mm2_value * u.area_factor
-        if u.length == "m":  return f"{val*1e6:.0f} mm^2"   # mm² regardless
-        if u.length == "cm": return f"{val:.1f} cm^2"
-        if u.length == "in": return f"{val:.2f} in^2"
-        if u.length == "ft": return f"{val*144:.0f} in^2"
-        return f"{val:.0f} mm^2"
+        """Format an area value (internally mm^2); ALWAYS rendered as mm^2."""
+        return self.units.fmt_area(mm2_value)
 
     def _fmt_force(self, kN_value: float) -> str:
-        u = self.units
-        return f"{kN_value * u.force_factor:.1f} {u.force}"
+        return self.units.fmt_force(kN_value)
 
     def _fmt_moment(self, kNm_value: float) -> str:
-        u = self.units
-        return f"{kNm_value * u.moment_factor:.1f} {u.force}.{u.length}"
+        return self.units.fmt_moment(kNm_value)
+
+    def _fmt_stress(self, MPa_value: float) -> str:
+        # Material strengths (fc', fy) are ALWAYS reported in MPa, regardless
+        # of the presentation units used for forces / moments / lengths.
+        return f"{MPa_value:.0f} MPa"
 
     def summary(self) -> None:
         u = self.units
@@ -1238,7 +1348,7 @@ class Beam:
 
         print(f"=== {self.label} ===  (units: {u.name})")
         print(f"Section   : {self._fmt_len(s.width())}x{self._fmt_len(s.height())} {u.length}")
-        print(f"Materials : fc = {s.concrete.fc:.0f} MPa, fy = {self.steel.fy:.0f} MPa")
+        print(f"Materials : fc = {self._fmt_stress(s.concrete.fc)}, fy = {self._fmt_stress(self.steel.fy)}")
         print(f"Rebar     : {n_bars} bars, As_tot = {self._fmt_area(Ast)}")
         print(f"            rho  = {cap.rho:.4f}  (bottom)")
         print(f"            rho' = {cap.rho_p:.4f}  (top)")
@@ -1252,6 +1362,24 @@ class Beam:
             print(f"Mpr-      : {self._fmt_moment(cap.Mpr_neg)}")
         print(f"TC        : {cap.tension_controlled}")
 
+        # Steel quantities (kg/m^3 of concrete)
+        from design.beams.optimize import (
+            longitudinal_steel_quantity, transverse_steel_quantity,
+        )
+        rho_l = longitudinal_steel_quantity(self)
+        rho_t = 0.0
+        if self.db_stirrup and self.s and self.s > 0:
+            n_legs = self._current_n_legs()
+            rho_t = transverse_steel_quantity(
+                self, db_stirrup=self.db_stirrup, n_legs=n_legs, spacing=self.s,
+            )
+            print(f"Stirrups  : phi{self.db_stirrup:.0f} x {n_legs} legs @ "
+                  f"{self._fmt_len(self.s)} {u.length}")
+        print(f"Steel quantities (kg/m^3 of concrete):")
+        print(f"  rho_long  = {rho_l:.2f}")
+        print(f"  rho_trans = {rho_t:.2f}")
+        print(f"  rho_total = {rho_l + rho_t:.2f}")
+
     def print_checks(self, demands: BeamDemands | None = None) -> None:
         """Pretty-print the full set of ACI 318-25 checks."""
         cap = self.capacity()
@@ -1262,23 +1390,23 @@ class Beam:
         # Cuantia
         rho_ok_bot = cap.rho_min <= cap.rho <= cap.rho_max
         rho_ok_top = cap.rho_min <= cap.rho_p <= cap.rho_max
-        print(f"§9.6.1.2 / 22.2  Cuantia (range 0.5*rho_b):")
+        print(f"Sec.9.6.1.2 / 22.2  Cuantia (range 0.5*rho_b):")
         print(f"  rho  (bot) = {cap.rho:.4f}    [{cap.rho_min:.4f} .. {cap.rho_max:.4f}]   {'OK' if rho_ok_bot else 'FAIL'}")
         print(f"  rho' (top) = {cap.rho_p:.4f}    [{cap.rho_min:.4f} .. {cap.rho_max:.4f}]   {'OK' if rho_ok_top else 'FAIL'}")
-        print(f"  rho_balanced = {cap.rho_balanced:.4f}    (ACI §18.6.3.1 SMF cap = {cap.rho_max_aci_smf:.4f})")
+        print(f"  rho_balanced = {cap.rho_balanced:.4f}    (ACI Sec.18.6.3.1 SMF cap = {cap.rho_max_aci_smf:.4f})")
         # Tension-controlled
-        print(f"§21.2.2          Tension-controlled                          : {'OK' if cap.tension_controlled else 'FAIL'}")
+        print(f"Sec.21.2.2          Tension-controlled                          : {'OK' if cap.tension_controlled else 'FAIL'}")
         # SMF continuity (only meaningful with seismic)
         if self.seismic:
             r_pos_neg = (cap.phi_Mn_pos / cap.phi_Mn_neg) if cap.phi_Mn_neg > 0 else float("inf")
             face_max = max(cap.phi_Mn_pos, cap.phi_Mn_neg)
             face_min = min(cap.phi_Mn_pos, cap.phi_Mn_neg)
             r_min_max = face_min / face_max if face_max > 0 else 0.0
-            print(f"§18.6.3.2        >=2 bars continuous (top, bot)            : "
+            print(f"Sec.18.6.3.2        >=2 bars continuous (top, bot)            : "
                   f"requires layout check at apply()")
-            print(f"§18.6.3.3        phi_Mn+ >= 0.5 phi_Mn-                    : "
+            print(f"Sec.18.6.3.3        phi_Mn+ >= 0.5 phi_Mn-                    : "
                   f"{r_pos_neg:.2f}   {'OK' if r_pos_neg >= 0.5 else 'FAIL'}")
-            print(f"§18.6.3.4        phi_Mn anywhere >= 0.25 max               : "
+            print(f"Sec.18.6.3.4        phi_Mn anywhere >= 0.25 max               : "
                   f"{r_min_max:.2f}   {'OK' if r_min_max >= 0.25 else 'FAIL'}")
         # Demand-based ratios
         if chk is not None:
@@ -1288,6 +1416,12 @@ class Beam:
             print(f"  M (j)  +/-: {chk.ratio_M_pos_j:.2f} / {chk.ratio_M_neg_j:.2f}")
             print(f"  V (i/mid/j): {chk.ratio_V_i:.2f} / {chk.ratio_V_mid:.2f} / {chk.ratio_V_j:.2f}")
             print(f"  Overall passed = {chk.passed}")
+            if chk.rho_total > 0:
+                print(f"---")
+                print(f"Steel quantities (kg/m^3 of concrete):")
+                print(f"  rho_long  = {chk.rho_long :.2f}")
+                print(f"  rho_trans = {chk.rho_trans:.2f}")
+                print(f"  rho_total = {chk.rho_total:.2f}")
 
     def current_proposal(
         self, demands: BeamDemands | None = None,
@@ -1332,8 +1466,8 @@ class Beam:
             As_bot_i = As_bot_m = As_bot_j = as_min
 
         # Seismic / Ve at current state
-        Mpr_pos = cap.Mn_pr_pos
-        Mpr_neg = cap.Mn_pr_neg
+        Mpr_pos = cap.Mpr_pos
+        Mpr_neg = cap.Mpr_neg
         if self.seismic and Mpr_pos is not None:
             vg_i, vg_mid, vg_j = self._resolve_vg(demands)
             V_seis = v_seismic_from_mpr(
@@ -1349,9 +1483,22 @@ class Beam:
             Ve_cap = None
             Vu_i_used = Vu_mid_used = Vu_j_used = None
 
-        # Av/s required at current spacing (for feasibility comparison)
-        av_s_req = (self._av_s_required_for(Ve_cap, vc_zero=False)
-                    if Ve_cap is not None else None)
+        # Av/s required at current spacing (for feasibility comparison).
+        # §18.6.5.2: take Vc = 0 in lo when the seismic shear governs and Pu
+        # is light. The capacity mode of _design_one already does this, so we
+        # mirror it here (via vc_zero_seismic, Pu ~ 0 for beams) — otherwise
+        # the "provided" feasibility verdict would be compared against an
+        # inconsistent (more lenient) Av/s baseline.
+        if Ve_cap is not None and self.seismic:
+            vc_zero_now = vc_zero_seismic(
+                V_seismic=V_seis, V_total=Ve_cap,
+                Pu=0.0, Ag=self.section.gross_area(),
+                fc=self.section.concrete.fc,
+            )
+            av_s_req = self._av_s_required_for(Ve_cap, vc_zero=vc_zero_now)
+        else:
+            vc_zero_now = False
+            av_s_req = None
         a_per_leg = pi * self.db_stirrup ** 2 / 4.0
         av_prov = n_legs * a_per_leg
 
@@ -1373,7 +1520,7 @@ class Beam:
             Vu_i_used=Vu_i_used, Vu_mid_used=Vu_mid_used,
             Vu_j_used=Vu_j_used,
             av_s_required=av_s_req,
-            vc_zero_active=False,
+            vc_zero_active=vc_zero_now,
             Mpr_pos=Mpr_pos, Mpr_neg=Mpr_neg,
             Ve_capacity=Ve_cap, phi_Vn=cap.phi_Vn,
             ratio_Ve_over_phiVn=(Ve_cap / cap.phi_Vn
@@ -1401,13 +1548,13 @@ class Beam:
         n_legs = self._current_n_legs()
 
         print(f"--- PROVIDED ---")
-        print(f"  Top         : {n_top}φ{db_top:.0f}    (As = {self._fmt_area(As_top)})")
-        print(f"  Bottom      : {n_bot}φ{db_bot:.0f}    (As = {self._fmt_area(As_bot)})")
+        print(f"  Top         : {n_top}phi{db_top:.0f}    (As = {self._fmt_area(As_top)})")
+        print(f"  Bottom      : {n_bot}phi{db_bot:.0f}    (As = {self._fmt_area(As_bot)})")
         if self.s and self.s > 0:
-            print(f"  Stirrups    : φ{self.db_stirrup:.0f} x {n_legs} legs @ "
+            print(f"  Stirrups    : phi{self.db_stirrup:.0f} x {n_legs} legs @ "
                   f"{self._fmt_len(self.s)} {u.length}")
         else:
-            print(f"  Stirrups    : φ{self.db_stirrup:.0f} x {n_legs} legs  "
+            print(f"  Stirrups    : phi{self.db_stirrup:.0f} x {n_legs} legs  "
                   f"(spacing not set)")
         print(f"  phi*Mn (+/-): {self._fmt_moment(cap.phi_Mn_pos)} / "
               f"{self._fmt_moment(cap.phi_Mn_neg)}")
@@ -1455,9 +1602,9 @@ class Beam:
 
         def fmt(p: BeamDesignProposal, header: str) -> None:
             print(f"--- {header} ---")
-            print(f"  Top         : {p.n_top}φ{p.db_top:.0f}    (As = {self._fmt_area(p.As_top_continuous)})")
-            print(f"  Bottom      : {p.n_bot}φ{p.db_bot:.0f}    (As = {self._fmt_area(p.As_bot_continuous)})")
-            print(f"  Stirrups    : φ{p.db_stirrup:.0f} x {p.n_legs} legs @ {self._fmt_len(p.spacing_confined)} {u.length}"
+            print(f"  Top         : {p.n_top}phi{p.db_top:.0f}    (As = {self._fmt_area(p.As_top_continuous)})")
+            print(f"  Bottom      : {p.n_bot}phi{p.db_bot:.0f}    (As = {self._fmt_area(p.As_bot_continuous)})")
+            print(f"  Stirrups    : phi{p.db_stirrup:.0f} x {p.n_legs} legs @ {self._fmt_len(p.spacing_confined)} {u.length}"
                   f"   (middle s = {self._fmt_len(p.spacing_middle)} {u.length}, lo = {self._fmt_len(p.lo)} {u.length})")
             if p.Mpr_pos is not None:
                 print(f"  Mpr (+/-)   : {self._fmt_moment(p.Mpr_pos)} / {self._fmt_moment(p.Mpr_neg)}"
@@ -1471,7 +1618,22 @@ class Beam:
                       + (f"   Ve/phiVn = {p.ratio_Ve_over_phiVn:.2f}"
                          if p.ratio_Ve_over_phiVn is not None else ""))
             if p.vc_zero_active:
-                print(f"  Vc = 0 in lo (§18.6.5.2)")
+                print(f"  Vc = 0 in lo (Sec.18.6.5.2)")
+            # Steel quantities for this mode
+            from design.beams.optimize import (
+                longitudinal_steel_quantity, transverse_steel_quantity,
+            )
+            rho_l_m = longitudinal_steel_quantity(
+                self,
+                As_top=p.As_top_continuous, As_bot=p.As_bot_continuous,
+            )
+            rho_t_m = transverse_steel_quantity(
+                self, db_stirrup=p.db_stirrup,
+                n_legs=p.n_legs, spacing=p.spacing_confined,
+            )
+            print(f"  steel (kg/m^3): rho_long = {rho_l_m:.1f}    "
+                  f"rho_trans = {rho_t_m:.1f}    "
+                  f"rho_total = {rho_l_m + rho_t_m:.1f}")
             if p.notes:
                 for n in p.notes:
                     print(f"  note: {n}")
@@ -1485,6 +1647,96 @@ class Beam:
             fmt(results.demand, "DEMAND")
         fmt(results.capacity, "CAPACITY")
         fmt(results.envelope, "ENVELOPE")
+
+    def print_final(
+        self,
+        proposal: BeamDesignProposal,
+        demands: BeamDemands | None = None,
+    ) -> None:
+        """Print the FINAL beam design in one consolidated block (English).
+
+        Combines section + materials + longitudinal layout + stirrups +
+        capacities + steel quantities, and, if ``demands`` is given, the
+        full BeamCheck ratios.
+        """
+        from design.beams.optimize import (
+            longitudinal_steel_quantity, transverse_steel_quantity,
+        )
+        u = self.units
+        s = self.section
+        cap = self.capacity()
+        steel = (s.rebar.groups[0].steel if s.rebar.groups
+                 else None)
+        fc = s.concrete.fc
+        fy = steel.fy if steel else 0.0
+
+        # Steel quantities for THIS proposal
+        rho_long  = longitudinal_steel_quantity(
+            self,
+            As_top=proposal.As_top_continuous,
+            As_bot=proposal.As_bot_continuous,
+        )
+        rho_trans = transverse_steel_quantity(
+            self,
+            db_stirrup=proposal.db_stirrup,
+            n_legs=proposal.n_legs,
+            spacing=proposal.spacing_confined,
+        )
+        rho_total = rho_long + rho_trans
+
+        bar_w = 76
+        print()
+        print("=" * bar_w)
+        print(f"  BEAM -- FINAL DESIGN   |   {self.label}   |   units: {u.name}")
+        print("=" * bar_w)
+        print(f"  Section          : {self._fmt_len(s.width())} x {self._fmt_len(s.height())} {u.length}   "
+              f"cover = {self._fmt_len(self.cover)} {u.length}")
+        print(f"  Materials        : fc' = {self._fmt_stress(fc)}    fy = {self._fmt_stress(fy)}")
+        print(f"  Span (clear)     : ln = {self._fmt_len(self.ln)} {u.length}")
+        print("-" * bar_w)
+        print(f"  Longitudinal:")
+        print(f"    Top            : {proposal.n_top} phi{proposal.db_top:.0f}   "
+              f"(As = {self._fmt_area(proposal.As_top_continuous)})")
+        print(f"    Bottom         : {proposal.n_bot} phi{proposal.db_bot:.0f}   "
+              f"(As = {self._fmt_area(proposal.As_bot_continuous)})")
+        print(f"  Stirrups:")
+        print(f"    phi{proposal.db_stirrup:.0f} x {proposal.n_legs} legs   "
+              f"s_lo = {self._fmt_len(proposal.spacing_confined)} {u.length}   "
+              f"s_mid = {self._fmt_len(proposal.spacing_middle)} {u.length}   "
+              f"lo = {self._fmt_len(proposal.lo)} {u.length}")
+        print("-" * bar_w)
+        print(f"  Capacities:")
+        print(f"    phi_Mn+         = {self._fmt_moment(cap.phi_Mn_pos)}")
+        print(f"    phi_Mn-         = {self._fmt_moment(cap.phi_Mn_neg)}")
+        print(f"    phi_Vn          = {self._fmt_force(cap.phi_Vn)}")
+        if cap.Mpr_pos:
+            print(f"    Mpr+ / Mpr-     = {self._fmt_moment(cap.Mpr_pos)} / "
+                  f"{self._fmt_moment(cap.Mpr_neg)}")
+        if proposal.Ve_capacity is not None:
+            print(f"    Ve capacity     = {self._fmt_force(proposal.Ve_capacity)}")
+        print(f"    TC              : {cap.tension_controlled}")
+        print("-" * bar_w)
+        print(f"  Steel quantities (kg/m^3 of concrete):")
+        print(f"    rho_long        = {rho_long :7.2f}")
+        print(f"    rho_trans (lo)  = {rho_trans:7.2f}")
+        print(f"    rho_total       = {rho_total:7.2f}")
+
+        if demands is not None:
+            chk = self.check(demands)
+            tag = lambda b: "PASS" if b else "FAIL"
+            print("-" * bar_w)
+            print(f"  Code check vs demands:")
+            print(f"    M (i)  +/-     : {chk.ratio_M_pos_i:.2f} / {chk.ratio_M_neg_i:.2f}")
+            print(f"    M (mid)+/-     : {chk.ratio_M_pos_mid:.2f} / {chk.ratio_M_neg_mid:.2f}")
+            print(f"    M (j)  +/-     : {chk.ratio_M_pos_j:.2f} / {chk.ratio_M_neg_j:.2f}")
+            print(f"    V (i/mid/j)    : {chk.ratio_V_i:.2f} / {chk.ratio_V_mid:.2f} / {chk.ratio_V_j:.2f}")
+            print(f"    rho range      : [{tag(chk.rho_ok)}]")
+            print(f"    TC             : [{tag(chk.tc_ok)}]")
+            if self.seismic:
+                print(f"    SMF continuity : [{tag(chk.smf_continuity_ok)}]")
+            print("  " + "-" * (bar_w - 4))
+            print(f"  OVERALL          : {tag(chk.passed)}")
+        print("=" * bar_w)
 
     def report(self) -> dict:
         u = self.units
@@ -1511,11 +1763,11 @@ class Beam:
                 "phi_Mn_pos": cap.phi_Mn_pos * u.moment_factor,
                 "phi_Mn_neg": cap.phi_Mn_neg * u.moment_factor,
                 "phi_Vn": cap.phi_Vn * u.force_factor,
-                "Mn_pr_pos": (cap.Mn_pr_pos or 0.0) * u.moment_factor,
-                "Mn_pr_neg": (cap.Mn_pr_neg or 0.0) * u.moment_factor,
+                "Mpr_pos": (cap.Mpr_pos or 0.0) * u.moment_factor,
+                "Mpr_neg": (cap.Mpr_neg or 0.0) * u.moment_factor,
             },
             "params": {
-                "ln_m": self.ln, "cover_mm": self.cover,
+                "ln_m": self.ln / 1000.0, "cover_mm": self.cover,
                 "seismic": self.seismic,
                 "s_mm": self.s, "Vg_kN": self.Vg,
             },
@@ -1524,8 +1776,9 @@ class Beam:
     def __repr__(self) -> str:
         s = self.section
         return (
-            f"Beam(label={self.label!r}, section={s.width():.0f}×{s.height():.0f} mm, "
-            f"fc={s.concrete.fc:.0f} MPa, units={self.units.name})"
+            f"Beam(label={self.label!r}, "
+            f"section={self._fmt_len(s.width())}x{self._fmt_len(s.height())} {self.units.length}, "
+            f"fc={self._fmt_stress(s.concrete.fc)}, units={self.units.name})"
         )
 
 

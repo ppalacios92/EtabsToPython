@@ -124,6 +124,48 @@ def perimeter_bars(
     return RebarGroup(bars=bars, steel=steel)
 
 
+def grid_bars(
+    *,
+    b: float,
+    h: float,
+    cover: float,
+    n_x: int,
+    n_y: int,
+    bar: Bar,
+    steel: Steel,
+    center: tuple[float, float] = (0.0, 0.0),
+) -> RebarGroup:
+    """Bars placed on a FULL n_x × n_y mesh inside a b × h rectangle.
+
+    Unlike :func:`perimeter_bars` (which puts bars only along the four
+    edges), this places ``n_x * n_y`` bars on a rectangular grid that
+    fills the whole rectangle — including the interior. Use it for
+    boundary-element cabezas and for wall flanges where ACI requires
+    a mesh of vertical bars (e.g. §18.10.6.4).
+
+    The outermost bars sit ``cover`` from the rectangle edges; interior
+    bars are evenly spaced between them. With ``n_x = 1`` (or ``n_y = 1``)
+    the bars collapse to a single line.
+    """
+    if n_x < 1 or n_y < 1:
+        raise ValueError("n_x and n_y must be >= 1.")
+
+    cx, cy = center
+    x0 = cx - b / 2 + cover
+    x1 = cx + b / 2 - cover
+    y0 = cy - h / 2 + cover
+    y1 = cy + h / 2 - cover
+
+    xs = np.linspace(x0, x1, n_x) if n_x > 1 else np.array([cx])
+    ys = np.linspace(y0, y1, n_y) if n_y > 1 else np.array([cy])
+
+    bars = tuple(
+        Rebar(x=float(x), y=float(y), area=bar.area)
+        for x in xs for y in ys
+    )
+    return RebarGroup(bars=bars, steel=steel)
+
+
 def two_layer_bars(
     *,
     b: float,

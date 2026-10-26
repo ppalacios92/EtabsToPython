@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 
-from design.columns.style import PlotStyle
+from design.common.plot_style import PlotStyle
 
 if TYPE_CHECKING:
     from design.walls.wall import Wall, WallDemands, WallDesignResults
@@ -42,8 +42,9 @@ class _WallPlotter:
             bar_scale=bar_scale if bar_scale is not None else s.bar_scale,
             concrete_color=s.color_concrete,
             rebar_color=s.color_rebar,
+            units=self._wall.units,
         )
-        ax.set_title(f"Wall section — {self._wall.label}")
+        ax.set_title(f"Wall section -- {self._wall.label}")
         return ax
 
     def be_section(self, *, which: str = "top", ax=None):
@@ -69,6 +70,7 @@ class _WallPlotter:
             reduced_kwargs={"color": s.color_reduced,
                             "lw": s.linewidth,
                             "label": r"$\phi M_n / \phi P_n$"},
+            units=units,
         )
         ax.set_title(f"P-M ({plane})  ({units.name})")
         return ax
@@ -93,8 +95,8 @@ class _WallPlotter:
                    label=r"$\phi P_{n,\max}$")
         ax.axhline(0, color="gray", lw=0.5)
         ax.axvline(0, color="gray", lw=0.5)
-        ax.set_xlabel(f"Moment ({u.force}·{u.length})")
-        ax.set_ylabel(f"Axial ({u.force}, + compression)")
+        ax.set_xlabel(f"Moment ({u.moment_label})")
+        ax.set_ylabel(f"Axial ({u.force_label}, + compression)")
         ax.set_title(f"P-M envelopes  ({u.name})")
         ax.grid(True, alpha=s.grid_alpha)
         ax.legend()
@@ -119,9 +121,9 @@ class _WallPlotter:
         else:
             ax.plot_surface(Mx, My, Pu, cmap="viridis",
                             alpha=s.fill_alpha, edgecolor="none")
-        ax.set_xlabel(f"M in-plane ({u.force}·{u.length})")
-        ax.set_ylabel(f"M out-of-plane ({u.force}·{u.length})")
-        ax.set_zlabel(f"Pu ({u.force})")
+        ax.set_xlabel(f"M in-plane ({u.moment_label})")
+        ax.set_ylabel(f"M out-of-plane ({u.moment_label})")
+        ax.set_zlabel(f"Pu ({u.force_label})")
         ax.set_title(f"P-M-M volume  ({u.name})")
         return ax
 
@@ -144,8 +146,8 @@ class _WallPlotter:
                     "o", color=s.color_demand, ms=8, label="Demand")
         ax.axhline(0, color="gray", lw=0.5)
         ax.axvline(0, color="gray", lw=0.5)
-        ax.set_xlabel(f"M in-plane ({u.force}·{u.length})")
-        ax.set_ylabel(f"M out-of-plane ({u.force}·{u.length})")
+        ax.set_xlabel(f"M in-plane ({u.moment_label})")
+        ax.set_ylabel(f"M out-of-plane ({u.moment_label})")
         ax.set_title(f"Biaxial slice at Pu = {Pu*u.force_factor:.0f} {u.force}")
         ax.set_aspect("equal", adjustable="datalim")
         ax.legend()

@@ -1,8 +1,9 @@
 """Shared building blocks for ``design/`` — materials, factors, shear,
 spacing, plot style, optimize base and contract Protocols.
 
-Imports from this package should be preferred over the per-element
-shims (``design.columns.style``, ``design.columns.probable``, etc.).
+Imports from this package are the single source of truth for shared
+formulas, plot style, bar schedule and probable-strength helpers
+(the former per-element re-export shims have been removed).
 """
 
 from design.common.materials import Concrete, Steel, Bar
@@ -18,7 +19,9 @@ from design.common.factors import (
     omega_v_wall,
 )
 from design.common.codes import ACI
-from design.common.units import UnitSystem, units_from, to_internal, DEFAULT_UNITS
+from design.common.units import (
+    UnitSystem, units_from, to_internal, DEFAULT_UNITS,
+)
 
 # --- shear ---
 from design.common.shear import (
@@ -45,6 +48,7 @@ from design.common.spacing import (
     s_max_middle_zone_column,
     hx_check,
     ash_required,
+    rho_s_spiral_required,
 )
 
 # --- plotting / optimize / contracts ---
@@ -59,6 +63,7 @@ from design.common.contracts import (
     Element,
     wall_demands_to_be,
 )
+from design.common.element_base import ElementBase
 
 # --- probable strength ---
 from design.common.probable import (
@@ -84,11 +89,11 @@ __all__ = [
     "lo_length_beam", "lo_length_column",
     "s_max_seismic_smf_beam", "s_max_seismic_outside_beam",
     "s_max_confined_column", "s_max_middle_zone_column",
-    "hx_check", "ash_required",
+    "hx_check", "ash_required", "rho_s_spiral_required",
     # plot / optimize / contracts
     "PlotStyle", "OptimizeAlternative", "format_optimize_table",
     "Demands", "Capacity", "Check", "DesignProposal", "DesignResults",
-    "Element", "wall_demands_to_be",
+    "Element", "wall_demands_to_be", "ElementBase",
     # probable
     "probable_interaction_diagram", "mpr_envelope",
 ]

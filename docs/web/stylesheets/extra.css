@@ -1,0 +1,118 @@
+/* EtabsToPython — design suite. Two-layer model:
+   (1) --ep-* palette tokens you tune per project,
+   (2) --md-* mappings that wire those tokens into Material.
+   Identity metaphor: a structural moment frame + reinforcing steel —
+   steel-blue primary accent, rebar-amber secondary.
+   See references/design-system.md for the full philosophy. */
+
+/* ---------- Light palette ---------- */
+[data-md-color-scheme="default"] {
+  --ep-bg:      #f4f3ee;            /* page background (concrete paper) */
+  --ep-bg-alt:  #e8e7df;            /* surfaces, inline code, cards */
+  --ep-ink:     #14181c;            /* body text */
+  --ep-ink-sub: rgba(20,24,28,0.70);
+  --ep-muted:   rgba(20,24,28,0.55);
+  --ep-hair:    rgba(20,24,28,0.16);/* hairline borders */
+  --ep-accent:  #1f6fb2;            /* PRIMARY accent — steel blue: links, code border */
+  --ep-accent2: #c8772e;            /* secondary accent — rebar amber */
+  --ep-title:   #123a57;            /* largest titles (h1) only — deep structural blue */
+  --ep-code-bg: #1b2229;
+  --ep-code-fg: #e8ecf2;
+  --ep-header:  #edebe3;            /* header bar */
+
+  --md-primary-fg-color:          var(--ep-header);
+  --md-primary-fg-color--light:   var(--ep-header);
+  --md-primary-fg-color--dark:    var(--ep-bg-alt);
+  --md-primary-bg-color:          var(--ep-ink);
+  --md-primary-bg-color--light:   var(--ep-ink-sub);
+  --md-accent-fg-color:           var(--ep-accent);
+  --md-default-bg-color:          var(--ep-bg);
+  --md-default-fg-color:          var(--ep-ink);
+  --md-default-fg-color--light:   var(--ep-ink-sub);
+  --md-default-fg-color--lighter: var(--ep-muted);
+  --md-typeset-a-color:           var(--ep-accent);
+  --md-footer-bg-color:           var(--ep-ink);
+  --md-footer-bg-color--dark:     var(--ep-ink);
+  --md-code-bg-color:             var(--ep-bg-alt);
+  --md-code-fg-color:             var(--ep-ink);
+}
+
+/* ---------- Dark palette ---------- */
+[data-md-color-scheme="slate"] {
+  --ep-bg:      #11161b;
+  --ep-bg-alt:  #18202a;
+  --ep-ink:     #e7ebef;
+  --ep-ink-sub: rgba(231,235,239,0.72);
+  --ep-muted:   rgba(231,235,239,0.55);
+  --ep-hair:    rgba(231,235,239,0.16);
+  --ep-accent:  #4fa3dd;            /* brighten the steel blue so it reads on dark */
+  --ep-accent2: #e0954a;            /* warm rebar amber */
+  --ep-title:   #8fc4e6;            /* light blue — a navy h1 would be invisible */
+  --ep-code-bg: #0c1116;
+  --ep-code-fg: #e8ecf2;
+  --ep-header:  #141b22;
+
+  --md-primary-fg-color:          var(--ep-header);
+  --md-primary-fg-color--light:   var(--ep-header);
+  --md-primary-fg-color--dark:    var(--ep-bg);
+  --md-primary-bg-color:          var(--ep-ink);
+  --md-accent-fg-color:           var(--ep-accent);
+  --md-default-bg-color:          var(--ep-bg);
+  --md-default-fg-color:          var(--ep-ink);
+  --md-default-fg-color--light:   var(--ep-ink-sub);
+  --md-default-fg-color--lighter: var(--ep-muted);
+  --md-typeset-a-color:           var(--ep-accent);
+  --md-code-bg-color:             var(--ep-bg-alt);
+  --md-code-fg-color:             var(--ep-ink);
+}
+
+/* ---------- Typography: ONE consistent scale on every page ----------
+   Material's defaults differ subtly per page; pin sizes explicitly so
+   Home / Guides / Examples / API all match. */
+.md-typeset h1, .md-typeset h2, .md-typeset h3, .md-typeset h4,
+.md-typeset h5, .md-typeset h6, .md-header__title, .md-nav__title {
+  font-family: "Space Grotesk", "Inter", system-ui, sans-serif;
+  letter-spacing: -0.01em;
+}
+.md-typeset      { font-size: 0.8rem; line-height: 1.65; }
+.md-typeset h1   { font-size: 2rem;    font-weight: 700; letter-spacing: -0.03em; color: var(--ep-title); margin: 0 0 1rem; }
+.md-typeset h2   { font-size: 1.45rem; font-weight: 600; margin: 2.2rem 0 0.8rem; }
+.md-typeset h3   { font-size: 1.15rem; font-weight: 600; margin: 1.6rem 0 0.6rem; }
+.md-typeset h4   { font-size: 1rem;    font-weight: 600; }
+.md-typeset p, .md-typeset li, .md-typeset td, .md-typeset th { font-size: 0.8rem; }
+
+/* Fenced code: accent left-border signature */
+.md-typeset pre > code,
+.md-typeset .highlight pre { border-left: 3px solid var(--ep-accent); }
+
+/* Swap logo variant in dark scheme */
+[data-md-color-scheme="slate"] .md-header__button.md-logo img,
+[data-md-color-scheme="slate"] .ep-hero__mark { content: url("../assets/logo-dark.svg"); }
+
+/* Header / tabs read like the theme surface */
+.md-header { color: var(--md-primary-bg-color); border-bottom: 1px solid var(--ep-hair); }
+.md-tabs   { background-color: var(--md-primary-fg-color); color: var(--md-primary-bg-color); border-bottom: 1px solid var(--ep-hair); }
+
+/* ---------- Landing hero ---------- */
+.ep-hero { display: flex; align-items: center; gap: 1.5rem; padding: 1.5rem 0 1rem; border-bottom: 1px solid var(--ep-hair); margin-bottom: 1.5rem; }
+.ep-hero__mark { width: 120px; height: 120px; flex: 0 0 auto; display: block; }
+.md-typeset .ep-hero__word {
+  font-family: "Space Grotesk", "Inter", system-ui, sans-serif;
+  font-weight: 700; font-size: 3rem; line-height: 1; letter-spacing: -0.03em;
+  color: var(--ep-title); margin: 0; padding: 0; border: none;
+}
+.md-typeset .ep-hero__word .headerlink { display: none; }
+.ep-hero__sub { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.72rem; letter-spacing: 0.3em; text-transform: uppercase; opacity: 0.6; margin-top: 0.4rem; color: var(--ep-ink); }
+
+/* ---------- "Where do you want to start?" cards ---------- */
+.md-typeset .grid.cards > ul > li,
+.md-typeset .grid > .card {
+  border: 1px solid var(--ep-hair); border-radius: 10px; background: var(--ep-bg-alt);
+  padding: 1rem 1.1rem; transition: border-color .2s, transform .2s, box-shadow .2s;
+}
+.md-typeset .grid.cards > ul > li:hover,
+.md-typeset .grid > .card:hover { border-color: var(--ep-accent); transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,0.10); }
+.md-typeset .grid.cards .twemoji, .md-typeset .grid.cards .lg.middle { color: var(--ep-accent); }
+.md-typeset .grid.cards > ul > li > hr { margin: 0.6rem 0; border-color: var(--ep-hair); }
+.md-typeset .grid.cards a { font-family: "Space Grotesk", "Inter", system-ui, sans-serif; font-weight: 600; }
+.md-typeset .grid.cards em { color: var(--ep-muted); font-size: 0.78rem; }

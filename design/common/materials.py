@@ -33,8 +33,16 @@ class Concrete:
 
     @property
     def sqrt_fc(self) -> float:
-        # ACI 318-25 §22.5.3.1 caps sqrt(fc) at sqrt(70 MPa) ~ 8.37 in shear eqs.
-        return sqrt(min(self.fc, 70.0))
+        # ACI 318-25 §22.5.3.1: sqrt(fc') shall not exceed 8.3 MPa
+        # (= 100 psi) in shear, torsion and development equations.
+        return min(sqrt(self.fc), 8.3)
+
+    @property
+    def fr(self) -> float:
+        # ACI 318-25 §19.2.3.1: modulus of rupture for deflection /
+        # cracking, fr = 0.62 lambda sqrt(fc') [MPa]. Uses the uncapped
+        # sqrt(fc') (the 8.3 MPa cap is a shear-equation rule only).
+        return 0.62 * self.lam * sqrt(self.fc)
 
     @property
     def eps_cu(self) -> float:

@@ -40,13 +40,16 @@ from design.common.plot_style import PlotStyle
 from design.common.shear import (
     alpha_c, vn_wall, vn_wall_max, ve_in_plane_capacity_wall,
 )
-from design.common.units import UnitSystem, units_from, DEFAULT_UNITS
+from design.common.units import UnitSystem, units_from, to_internal, DEFAULT_UNITS
+from design.common.element_base import ElementBase
 from design.sections.wall import (
     WallSection, BoundaryElementSection, be_perimeter_bars,
 )
 from design.sections.reinforcement import RebarGroup, RebarLayout, perimeter_bars
-from design.columns.column import Column, ColumnDesignProposal
-from design.columns.bar_schedule import BarSchedule
+from design.columns.column import (
+    Column, ColumnDemands, ColumnDesignProposal, ColumnCapacity,
+)
+from design.common.bar_schedule import BarSchedule
 from design.columns.interaction import InteractionDiagram
 from design.columns.interaction_surface import (
     InteractionSurface, interaction_surface,
@@ -64,13 +67,19 @@ from design.walls.boundary import (
     boundary_extension_length,
     be_thickness_minimum,
     propose_be_geometry, c_at_demand,
+    a_at_demand, tension_controlled_at_demand,
     BEGeometryProposal,
 )
 from design.walls.distributed import (
     rho_min_distributed, web_bar_spacing_max, two_curtain_required,
     web_bars_for_rho, web_rho_provided,
 )
-from design.walls.probable import mpr_in_plane
+from design.walls.probable import mpr_in_plane, mpr_out_of_plane
+from design.walls.boundary import (
+    wall_drift_capacity, boundary_drift_capacity_ok, boundary_width_ok,
+    ash_required_be,
+)
+from design.common.probable import mpr_at_axial
 
 
 # ====================================================================== #
@@ -102,6 +111,18 @@ class WallCapacity:
     rho_l_min: float
     rho_t_min: float
     double_curtain_required: bool
+    # ---- Boundary-element evaluation (§18.10.6) — the wall reports the
+    #      capacity of its own BEs (each BE is a real Column), so a wall
+    #      with as-built BEs is fully inspectable, not just "BE present". ----
+    has_boundary_elements: bool = False
+    be_top_capacity: Optional[ColumnCapacity] = None
+    be_bot_capacity: Optional[ColumnCapacity] = None
+    # ---- Probable strength (§18.10.3) — Mpr in/out-of-plane, and the
+    #      sectional reference Mpr at zero axial (P=0). ----
+    Mpr_in_plane: Optional[float] = None
+    Pu_at_Mpr_in_plane: Optional[float] = None
+    Mpr_out_of_plane: Optional[float] = None
+    Mpr_in_plane_at_zero: Optional[float] = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,8 +138,86 @@ class WallCheck:
     be_thickness_min: float
     distributed_rho_ok: bool
     double_curtain_ok: bool
-    c_at_demand: float
+    # Sectional flexure-compression diagnostics (in-plane bending, §22.2.2.4)
+    c_at_demand: float              # neutral-axis depth at Pu (mm)
+    a_at_demand: float              # compression block depth a = β1·c (mm)
+    tension_controlled: bool        # §21.2.2 — eps_t >= eps_ty + 0.003
+    eps_t_at_demand: float          # extreme tension steel strain at Pu
+    phi_at_demand: float            # strength-reduction factor used at Pu
     passed: bool
+    # ---- Integral boundary-element verification (§18.10.6) ----
+    be_present: bool = False
+    be_confinement_ok: bool = True       # BE Ash provided >= required §18.10.6.4(g)
+    be_pm_ok: bool = True                # BE-column resists its prorated axial
+    be_long_rho: float = 0.0             # provided longitudinal rho in the BE
+    be_long_rho_min: float = 0.0         # §18.10.6.4 / 6 sqrt(fc')/fy floor
+    be_long_rho_ok: bool = True
+    # §18.10.6.2(b): drift-capacity (iii) and width (ii) checks
+    drift_capacity: Optional[float] = None
+    drift_capacity_required: Optional[float] = None
+    drift_capacity_ok: bool = True
+    width_ok: bool = True
+    be_width_required: float = 0.0
+    # Steel quantities (kg/m³ of concrete) — populated by check()
+    rho_long:  float = 0.0
+    rho_trans: float = 0.0
+    rho_total: float = 0.0
+
+    def summary(self, units=None) -> None:
+        """Print a structured one-line-per-gate report.
+
+        ``units`` (a :class:`~design.common.units.UnitSystem`, optional) is
+        threaded from the owning :class:`Wall` so BE length/thickness follow
+        the display units. When ``None`` the lengths fall back to canonical mm.
+        """
+        tag = lambda b: "PASS" if b else "FAIL"
+        if units is not None:
+            be_len = units.fmt_length(self.be_length_required)
+            be_thk = units.fmt_length(self.be_thickness_min)
+        else:
+            be_len = f"{self.be_length_required:.0f} mm"
+            be_thk = f"{self.be_thickness_min:.0f} mm"
+        print(f"=== Wall check ===")
+        print(f"  PM (in-plane)  : ratio = {self.ratio_pm:.3f}    "
+              f"[{tag(self.ratio_pm <= 1.0)}]")
+        print(f"  Shear in-plane : ratio = {self.ratio_shear:.3f}    "
+              f"[{tag(self.ratio_shear <= 1.0)}]")
+        if self.ratio_shear_out is not None:
+            print(f"  Shear out-pl.  : ratio = {self.ratio_shear_out:.3f}    "
+                  f"[{tag(self.ratio_shear_out <= 1.0)}]")
+        print(f"  Distrib. rho   : web rho_l/rho_t vs min   "
+              f"[{tag(self.distributed_rho_ok)}]")
+        print(f"  Double curtain : feasibility               "
+              f"[{tag(self.double_curtain_ok)}]")
+        print(f"  BE by displ.   : required = {self.be_required_disp}    "
+              f"(Sec.18.10.6.2)")
+        print(f"  BE by stress   : required = {self.be_required_stress}   "
+              f"(Sec.18.10.6.3)")
+        if self.be_required_disp or self.be_required_stress:
+            print(f"    BE length req. : {be_len}")
+            print(f"    BE thickness   : >= {be_thk}")
+            print(f"    BE present     : {self.be_present}            "
+                  f"[{tag((not (self.be_required_disp or self.be_required_stress)) or self.be_present)}]")
+            print(f"    BE confinement : Ash/hx/s (Sec.18.10.6.4)   "
+                  f"[{tag(self.be_confinement_ok)}]")
+            print(f"    BE long. rho   : {self.be_long_rho:.4f} vs min "
+                  f"{self.be_long_rho_min:.4f}   [{tag(self.be_long_rho_ok)}]")
+        if self.drift_capacity is not None:
+            print(f"    Drift capacity : {self.drift_capacity:.4f} vs "
+                  f"1.5*demand {self.drift_capacity_required:.4f}  "
+                  f"(Sec.18.10.6.2b)  [{tag(self.drift_capacity_ok)}]")
+            print(f"    BE width       : {tag(self.width_ok)}  "
+                  f"(b >= {self.be_width_required:.0f} mm, Sec.18.10.6.2(b)(ii))")
+        print(f"  Tension-control: eps_t = {self.eps_t_at_demand:.4f}    "
+              f"phi @ Pu = {self.phi_at_demand:.3f}    [{tag(self.tension_controlled)}]")
+        print(f"  ---")
+        print(f"  passed         : {self.passed}")
+        if self.rho_total > 0:
+            print(f"  ---")
+            print(f"  Steel quantities (kg/m^3 of concrete):")
+            print(f"    rho_long  = {self.rho_long :7.2f}")
+            print(f"    rho_trans = {self.rho_trans:7.2f}")
+            print(f"    rho_total = {self.rho_total:7.2f}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,7 +243,8 @@ class WallDesignProposal:
     be_thickness_proposed: float
     be_extension_above: float
     be_extension_below: float
-    c_used: float
+    c_used: float                    # neutral-axis depth that drove the BE proposal (mm)
+    a_used: float = 0.0              # compression block depth a = β1·c (mm) — §22.2.2.4
 
     # ---- BE confinement (delegated to columns.Column) ----
     be_top_proposal: Optional[ColumnDesignProposal] = None
@@ -187,12 +287,14 @@ class WallDesignResults:
     history:    tuple["Wall", ...] = ()
     iterations: int = 1
     converged:  bool = True
+    # No __getattr__ proxy by contract (AGENTS.md §4). Use
+    # `results.envelope.X` explicitly to access proposal fields.
 
 
 # ====================================================================== #
 # Wall class
 # ====================================================================== #
-class Wall:
+class Wall(ElementBase):
     """Concrete wall (in-plane + out-of-plane).
 
     Immutable composition of:
@@ -350,11 +452,11 @@ class Wall:
         """Build a Wall in a single call from scalar specs.
 
         Parity with ``Beam.rectangular()`` and ``Column.rectangular()``.
-        Canonical units per ``design/AGENTS.md`` §1: mm everywhere.
 
-        ``hw`` / ``lu`` accept metres as a back-compat convenience (any
-        value < 30 is treated as metres and converted to mm with a
-        DeprecationWarning); pass mm explicitly to silence.
+        All length inputs (``lw, tw, hw, lu, db_web, cover, be_*_length,
+        be_*_thickness, db_be, db_stirrup, hx``) are interpreted in ``units``
+        and converted to internal mm; omitting ``units`` reads them in
+        :data:`DEFAULT_UNITS` (``N_mm_C`` → mm). ``fyt`` is always MPa.
 
         Web reinforcement is laid out as a perimeter cage of ``n_y_web``
         bars per face (left/right) with vertical bars at the long faces.
@@ -373,23 +475,19 @@ class Wall:
                 cover=40, seismic=True,
             )
         """
-        # --- legacy metres -> mm with DeprecationWarning ---
-        import warnings
-        def _coerce_mm(val: float | None, name: str) -> float | None:
-            if val is None:
-                return None
-            if 0 < val < 30:
-                warnings.warn(
-                    f"Wall.rectangular({name}={val}) looks like metres; "
-                    f"converting to {val * 1000:.0f} mm. Pass mm directly "
-                    "to silence this warning.",
-                    DeprecationWarning, stacklevel=3,
-                )
-                return float(val) * 1000.0
-            return float(val)
+        # --- `units` is PRESENTATION ONLY ---
+        # Every scalar input is canonical mm (coherent with the common/
+        # equations). `units` never reinterprets the geometry — it only governs
+        # DISPLAY and how demands() reads forces/moments/stress. Change it any
+        # time with wall.set_units(...).
+        u = (units if isinstance(units, UnitSystem)
+             else units_from(units) if units is not None
+             else DEFAULT_UNITS)
 
-        hw_mm = _coerce_mm(hw, "hw")
-        lu_mm = _coerce_mm(lu, "lu") if lu is not None else hw_mm
+        hw_mm = hw
+        lu_mm = lu if lu is not None else hw_mm
+        # lw, tw, db_web, cover, be_*_length, be_*_thickness, db_be, db_stirrup,
+        # hx are all canonical mm — no unit reinterpretation here.
 
         # --- thickness defaults for BE ---
         bt_top = be_top_thickness if be_top_thickness is not None else tw
@@ -494,7 +592,7 @@ class Wall:
             n_x_be=n_x_be,
             be_db_default=db_be,
             be_n_y_default=n_y_be,
-            units=units,
+            units=u,
             bar_schedule=bar_schedule,
             label=label,
             run_settings=run_settings,
@@ -503,19 +601,37 @@ class Wall:
     # ================================================================== #
     # Configuration helpers
     # ================================================================== #
-    def set_units(self, code_or_name: int | str) -> "Wall":
-        self.units = units_from(code_or_name)
-        return self
 
-    @property
-    def hw_m(self) -> float:
-        """Wall height in metres — legacy view (canonical unit is mm)."""
-        return self.hw / 1000.0
+    def demands(
+        self,
+        *,
+        Pu: float = 0.0,
+        Mu: float = 0.0,
+        Mu_out: float = 0.0,
+        Vu: float = 0.0,
+        Vu_out: float = 0.0,
+        delta_u: float = 0.0,
+        sigma_max: float = 0.0,
+        units: int | str | UnitSystem | None = None,
+    ) -> "WallDemands":
+        """Build a :class:`WallDemands` from values in display units.
 
-    @property
-    def lu_m(self) -> float:
-        """Unbraced length in metres — legacy view (canonical unit is mm)."""
-        return self.lu / 1000.0
+        Forces (``Pu, Vu, Vu_out``) → kN, moments (``Mu, Mu_out``) → kN·m,
+        ``delta_u`` (length) → mm, ``sigma_max`` (stress) → MPa. Read in
+        ``units`` (defaults to this wall's ``self.units``).
+        """
+        u = (units if isinstance(units, UnitSystem)
+             else units_from(units) if units is not None
+             else self.units)
+        return WallDemands(
+            Pu=to_internal("force", Pu, units=u),
+            Mu=to_internal("moment", Mu, units=u),
+            Mu_out=to_internal("moment", Mu_out, units=u),
+            Vu=to_internal("force", Vu, units=u),
+            Vu_out=to_internal("force", Vu_out, units=u),
+            delta_u=to_internal("length", delta_u, units=u),
+            sigma_max=to_internal("stress", sigma_max, units=u),
+        )
 
     def run_optimize(
         self,
@@ -681,6 +797,42 @@ class Wall:
             label=f"{self.label}-BE-{which}",
         )
 
+    def _be_column_demands(
+        self, demands: WallDemands | None, which: str = "top",
+    ) -> ColumnDemands | None:
+        """Map wall demands to a BE-column demand with a **prorated axial**.
+
+        ACI 318-25 §18.10.6.3 / R18.10.6.3: the compressed boundary resists
+        the tributary gravity load plus the flexural compression resultant
+        of the wall moment. Passing the wall's full ``Pu`` to the BE-column
+        (as the raw ``wall_demands_to_be`` does) over-states the BE axial and
+        distorts its confinement (Ash expression (c) triggers spuriously).
+
+        Estimate the BE axial as
+
+            Pu_BE = Pu * (A_BE / A_g) + |Mu| / jd ,   jd ≈ lw - be_length
+
+        (the gravity share plus the moment couple over the lever arm between
+        boundary centroids). The BE's own bending is negligible relative to
+        this axial role, so Mux/Muy are taken as 0 — the global wall PMM
+        already verifies the flexure that includes the BE bars.
+        """
+        if demands is None:
+            return None
+        s = self.section
+        if which == "top":
+            be_len = s.be_length_top
+            a_be = s.be_thickness_top * s.be_length_top
+        else:
+            be_len = s.be_length_bot
+            a_be = s.be_thickness_bot * s.be_length_bot
+        Ag = s.gross_area()
+        jd = max(s.lw - be_len, 0.5 * s.lw)          # mm
+        share = (a_be / Ag) if Ag > 0 else 0.0
+        # Mu kN·m, jd mm -> Mu*1000/jd gives kN
+        Pu_be = demands.Pu * share + abs(demands.Mu) * 1000.0 / jd
+        return ColumnDemands(Pu=Pu_be, Mux=0.0, Muy=0.0, Vux=0.0, Vuy=0.0)
+
     @property
     def plot(self):
         if self._plotter is None:
@@ -718,6 +870,19 @@ class Wall:
         diagram_in = self.surface[0.0]
         diagram_out = self.surface[90.0] if biaxial else None
 
+        # ---- Evaluate the boundary elements (each BE is a real Column) ----
+        be_top_cap = self.be_top.capacity() if self.be_top is not None else None
+        be_bot_cap = self.be_bot.capacity() if self.be_bot is not None else None
+
+        # ---- Probable strength (§18.10.3): Mpr in-plane at the gravity Pu,
+        #      out-of-plane, and the sectional reference Mpr at P=0. ----
+        try:
+            Mpr_ip, Pu_at_Mpr = mpr_in_plane(s)
+            Mpr_ip0 = mpr_at_axial(s, Nu=0.0, angle_deg=0.0)
+            Mpr_oop = mpr_at_axial(s, Nu=0.0, angle_deg=90.0)
+        except Exception:
+            Mpr_ip = Pu_at_Mpr = Mpr_ip0 = Mpr_oop = None
+
         return WallCapacity(
             Po=self.Po, To=self.To, phi_Pn_max=self.phi_Pn_max,
             surface=self.surface,
@@ -730,6 +895,13 @@ class Wall:
             rho_l_min=rho_l_min,
             rho_t_min=rho_t_min,
             double_curtain_required=dc,
+            has_boundary_elements=self.has_boundary_elements,
+            be_top_capacity=be_top_cap,
+            be_bot_capacity=be_bot_cap,
+            Mpr_in_plane=Mpr_ip,
+            Pu_at_Mpr_in_plane=Pu_at_Mpr,
+            Mpr_out_of_plane=Mpr_oop,
+            Mpr_in_plane_at_zero=Mpr_ip0,
         )
 
     # ================================================================== #
@@ -755,8 +927,21 @@ class Wall:
         ratio_v = (demands.Vu / cap.phi_Vn) if cap.phi_Vn > 0 else float("inf")
         ratio_v_out = None  # out-of-plane shear: conservative, not modeled here
 
-        # BE checks based on c at demand
+        # Section-level diagnostics at the demand point (in-plane bending).
+        # `c` and `a = β1·c` come from the strict ACI definition: read the
+        # envelope at the height of Pu. `tension_controlled` /
+        # `eps_t_at_demand` / `phi_at_demand` tell which §21.2.2 branch
+        # governs the wall flexure — useful when verifying capacity-design
+        # margins.
         c_dem = c_at_demand(cap.diagram, Pu=demands.Pu, Mu=demands.Mu)
+        a_dem = c_dem * s.concrete.beta1
+        eps_ty_steel = (
+            s.rebar.groups[0].steel.eps_ty
+            if s.rebar.groups else 0.002
+        )
+        tc, eps_t, phi_at = tension_controlled_at_demand(
+            cap.diagram, Pu=demands.Pu, eps_ty=eps_ty_steel,
+        )
         be_d = boundary_element_required_displacement(
             c=c_dem, lw=s.lw, delta_u=demands.delta_u, hw=self.hw,
         )
@@ -781,12 +966,81 @@ class Wall:
         double_curtain_ok = (not dc_required) or s.tw >= 200.0
 
         be_present = self.has_boundary_elements
-        be_ok = (not (be_d or be_s)) or be_present
+
+        # ---- Integral BE verification (§18.10.6) -------------------------
+        # The BE is a real Column: delegate its confinement / axial check to
+        # the column engine, with a PRORATED axial (§18.10.6.3). The global
+        # wall PMM (ratio_pm) already covers the flexure that includes BE bars.
+        be_confinement_ok = True
+        be_pm_ok = True
+        be_long_rho = be_long_rho_min = 0.0
+        be_long_rho_ok = True
+        if be_present:
+            be_dem = self._be_column_demands(demands, "top")
+            try:
+                be_chk = self.be_top.check(be_dem) if self.be_top else None
+            except Exception:
+                be_chk = None
+            if be_chk is not None:
+                be_confinement_ok = bool(be_chk.ash_ok and be_chk.s_confined_ok
+                                         and be_chk.hx_ok)
+                be_pm_ok = be_chk.ratio_pmm <= 1.0
+            # Longitudinal rho of the BE vs the §18.10.6.4 floor 6 sqrt(fc')/fy
+            be_rebar = s.be_top_rebar()
+            be_rect = s.be_top_rect()
+            if be_rebar is not None and be_rect is not None:
+                x0, y0, x1, y1 = be_rect
+                a_be = max((x1 - x0) * (y1 - y0), 1.0)
+                be_long_rho = be_rebar.total_area / a_be
+                # §18.10.6.4(b) requires column-style detailing of the BE, so
+                # the BE region carries at least the column minimum ρg = 0.01
+                # (§10.6.1) as a longitudinal floor.
+                be_long_rho_min = 0.01
+                be_long_rho_ok = be_long_rho + 1e-9 >= be_long_rho_min
+
+        # ---- §18.10.6.2(b): drift-capacity (iii) and width (ii) ----------
+        drift_cap = drift_cap_req = None
+        drift_cap_ok = True
+        width_ok = True
+        be_width_req = 0.0
+        if be_d:                      # only meaningful when displacement governs
+            b_be = s.be_thickness_top if be_present else s.tw
+            Ve_ip = self.omega_v_factor * demands.Vu      # §18.10.3 amplified shear
+            drift_cap_ok, drift_cap, drift_cap_req = boundary_drift_capacity_ok(
+                c=c_dem, lw=s.lw, b=b_be, Ve=Ve_ip, Acv=s.Acv,
+                fc=s.concrete.fc, delta_u=demands.delta_u, hw=self.hw,
+            )
+            width_ok, be_width_req = boundary_width_ok(b=b_be, c=c_dem, lw=s.lw)
+
+        # BE is acceptable if not required, OR present + confined + the
+        # §18.10.6.2(b) pair (i) and either (ii) or (iii) is satisfied.
+        be_required = be_d or be_s
+        be_geom_ok = (width_ok or drift_cap_ok) if be_d else True
+        be_ok = (not be_required) or (
+            be_present and be_confinement_ok and be_long_rho_ok and be_geom_ok
+        )
 
         passed = (
             ratio_pm <= 1.0 and ratio_v <= 1.0
             and distributed_ok and double_curtain_ok and be_ok
         )
+
+        # Steel quantities (kg/m³)
+        from design.walls.optimize import (
+            longitudinal_steel_quantity, transverse_steel_quantity,
+        )
+        rho_long = longitudinal_steel_quantity(self)
+        rho_trans = 0.0
+        # Use the as-built web distributed bars if we know them
+        try:
+            db_web = getattr(self, "db_web", None) or 12.0
+            spacing = getattr(self, "web_bar_spacing", None) or 200.0
+            layers = 2 if cap.double_curtain_required else 1
+            rho_trans = transverse_steel_quantity(
+                self, db_web=db_web, spacing=spacing, layers=layers,
+            )
+        except Exception:
+            pass
 
         return WallCheck(
             capacity=cap, demands=demands,
@@ -800,7 +1054,25 @@ class Wall:
             distributed_rho_ok=distributed_ok,
             double_curtain_ok=double_curtain_ok,
             c_at_demand=c_dem,
+            a_at_demand=a_dem,
+            tension_controlled=tc,
+            eps_t_at_demand=eps_t,
+            phi_at_demand=phi_at,
             passed=passed,
+            be_present=be_present,
+            be_confinement_ok=be_confinement_ok,
+            be_pm_ok=be_pm_ok,
+            be_long_rho=be_long_rho,
+            be_long_rho_min=be_long_rho_min,
+            be_long_rho_ok=be_long_rho_ok,
+            drift_capacity=drift_cap,
+            drift_capacity_required=drift_cap_req,
+            drift_capacity_ok=drift_cap_ok,
+            width_ok=width_ok,
+            be_width_required=be_width_req,
+            rho_long=rho_long,
+            rho_trans=rho_trans,
+            rho_total=rho_long + rho_trans,
         )
 
     # ================================================================== #
@@ -957,6 +1229,20 @@ class Wall:
         )
         rho_l_prov = rho_t_prov  # in walls long/transv minima are equal
 
+        # Diagnostics — warn if the wall's current rho_t is below the
+        # required value (the design proposes what it should be; the
+        # warning surfaces the gap to the caller).
+        if rho_t_prov + 1e-9 < rho_t_req:
+            notes.append(
+                f"rho_t provided {rho_t_prov:.4f} < required {rho_t_req:.4f} "
+                f"(Sec.18.10.4.1 / Sec.18.10.2.1) -- increase phi/spacing/layers."
+            )
+        if spacing_final > spacing_max + 1e-6:
+            notes.append(
+                f"web bar spacing {spacing_final:.0f} mm > max {spacing_max:.0f} mm "
+                f"(Sec.11.7.2.1 / Sec.11.7.3.1)."
+            )
+
         # ---- Capacity / shear (§18.10.4) ----
         Vn_provided = vn_wall(
             Acv=s.Acv, fc=c.fc, rho_t=rho_t_prov, fyt=self.fyt,
@@ -984,7 +1270,7 @@ class Wall:
             if Ve_used > phi_Vn_max:
                 notes.append(
                     f"Ve_used {Ve_used:.0f} kN exceeds phi*Vn_max {phi_Vn_max:.0f} kN "
-                    f"(§18.10.4.4) — wall is shear-undersized."
+                    f"(Sec.18.10.4.4) -- wall is shear-undersized."
                 )
 
         # ---- Av/s required for the shear demand ----
@@ -1020,6 +1306,17 @@ class Wall:
                 required=False,
             )
 
+        # Compression block depth at the demand (informational, §22.2.2.4).
+        a_dem_kn = c_dem * c.beta1
+        # Sanity: the equivalent stress block must fit inside the section
+        # depth (lw for in-plane bending). If a > lw the section is over-
+        # reinforced and the analysis stops being meaningful — flag it.
+        if a_dem_kn > s.lw + 1e-6:
+            notes.append(
+                f"a = beta1*c = {a_dem_kn:.0f} mm exceeds lw = {s.lw:.0f} mm "
+                "(Sec.22.2.2.4) -- compression block extends past the section."
+            )
+
         # ---- Build proposed section if BE is needed and current is short ----
         proposed_section: Optional[WallSection] = None
         if be_proposal.required and mode in ("demand", "capacity"):
@@ -1035,15 +1332,18 @@ class Wall:
                 )
 
         # ---- Detail each BE as a column proposal (if BE exists) ----
+        # Use a PRORATED axial for the BE (§18.10.6.3) — the wall's full Pu
+        # over-states the BE demand and distorts its Ash. See
+        # _be_column_demands. The BE confinement (Ash, hoops) is delegated to
+        # the column engine and surfaced in the proposal / reports.
         be_top_prop = be_bot_prop = None
-        col_demands = wall_demands_to_be(demands) if demands is not None else None
         if self.be_top is not None:
             be_top_prop = self.be_top.design(
-                col_demands, clear_cover=clear_cover,
+                self._be_column_demands(demands, "top"), clear_cover=clear_cover,
             ).envelope
         if self.be_bot is not None:
             be_bot_prop = self.be_bot.design(
-                col_demands, clear_cover=clear_cover,
+                self._be_column_demands(demands, "bot"), clear_cover=clear_cover,
             ).envelope
 
         Pu_used = demands.Pu if (mode == "demand" and demands is not None) else (
@@ -1072,6 +1372,7 @@ class Wall:
             be_extension_above=be_proposal.extension_above,
             be_extension_below=be_proposal.extension_below,
             c_used=c_dem,
+            a_used=a_dem_kn,
             be_top_proposal=be_top_prop,
             be_bot_proposal=be_bot_prop,
             Mpr_in_plane=Mpr_ip,
@@ -1137,6 +1438,7 @@ class Wall:
             be_extension_above=max(p.be_extension_above for p in modes),
             be_extension_below=max(p.be_extension_below for p in modes),
             c_used=ref.c_used,
+            a_used=ref.a_used,
             be_top_proposal=ref.be_top_proposal,
             be_bot_proposal=ref.be_bot_proposal,
             Mpr_in_plane=prop_cap.Mpr_in_plane,
@@ -1182,17 +1484,17 @@ class Wall:
         # Default n_x_be from the wall instance attribute
         if n_x_be is None:
             n_x_be = self.n_x_be
-        # Pick BE longitudinal bars: use the largest available <= 25 mm,
-        # with rho_BE ~ 1% as a baseline (§18.10.6.4(b)).
-        be_db = min(
-            (d for d in self.bar_schedule.longitudinal if d <= 25.0),
-            default=self.bar_schedule.longitudinal[-1],
-        )
+        # ---- BE longitudinal from the BASELINE -------------------------
+        # Start from the as-built BE detailing kept on the wall
+        # (be_db_default, be_n_y_default) — the "line base" the design grows
+        # from — and ensure the column-style floor ρg >= 0.01 over the BE
+        # region (§18.10.6.4(b) calls for column-style detailing, §10.6.1).
+        be_db = self.be_db_default
         a_bar = pi * be_db ** 2 / 4.0
-        be_area_target = 0.01 * proposal.length * proposal.thickness  # mm² (~1%)
-        # Bars per long edge — distributed along the BE length so that
-        # n_x_be * n_y * a_bar >= be_area_target (perimeter pattern).
-        n_y = max(4, ceil(be_area_target / (n_x_be * a_bar)))
+        be_area_min = 0.01 * proposal.length * proposal.thickness   # ρg >= 1%
+        n_y_for_rho = ceil(be_area_min / (n_x_be * a_bar))
+        # n_y is the larger of: the baseline count, the count for ρg>=1%, and 4.
+        n_y = max(self.be_n_y_default, n_y_for_rho, 4)
 
         steel = (
             self.section.rebar.groups[0].steel
@@ -1260,16 +1562,19 @@ class Wall:
         new.rho_t = proposal.rho_t_provided or self.rho_t
         new.rho_l = proposal.rho_l_provided or self.rho_l
         new.web_bar_diameter = proposal.web_bar_db or self.web_bar_diameter
-        # Propagate BE column proposals to the new wall's BE columns
+        # Propagate BE column proposals to the new wall's BE columns. Column
+        # is immutable: apply() returns a NEW column, so we must capture it
+        # (AGENTS.md §4) — discarding the return would silently drop the BE
+        # confinement that was just designed.
         if proposal.be_top_proposal is not None and new.be_top is not None:
-            new.be_top.apply(proposal.be_top_proposal)
+            applied = new.be_top.apply(proposal.be_top_proposal)
+            if applied is not None:
+                new._be_top = applied
         if proposal.be_bot_proposal is not None and new.be_bot is not None:
-            new.be_bot.apply(proposal.be_bot_proposal)
+            applied = new.be_bot.apply(proposal.be_bot_proposal)
+            if applied is not None:
+                new._be_bot = applied
         return new
-
-    def apply(self, proposal: WallDesignProposal) -> "Wall":
-        """Back-compat alias for `evolve()` — returns a NEW Wall."""
-        return self.evolve(proposal)
 
     def _with_section(self, new_section: WallSection) -> "Wall":
         """Return a copy of self with a different section. No design cache."""
@@ -1297,28 +1602,230 @@ class Wall:
         u = self.units
         s = self.section
         print(f"=== {self.label} ===  (units: {u.name})")
-        print(f"Section : lw = {s.lw*u.length_factor:.0f} {u.length}, "
-              f"tw = {s.tw*u.length_factor:.0f} {u.length}")
-        print(f"Heights : hw = {self.hw*u.length_factor:.0f} {u.length}, "
-              f"lu = {self.lu*u.length_factor:.0f} {u.length}")
-        print(f"Material: fc = {s.concrete.fc:.0f} MPa, fyt = {self.fyt:.0f} MPa")
+        print(f"Section : lw = {u.fmt_length(s.lw)}, "
+              f"tw = {u.fmt_length(s.tw)}")
+        print(f"Heights : hw = {u.fmt_length(self.hw)}, "
+              f"lu = {u.fmt_length(self.lu)}")
+        print(f"Material: fc = {s.concrete.fc:.0f} MPa, "
+              f"fyt = {self.fyt:.0f} MPa")
         print(f"Web rho : rho_l = {self.rho_l:.4f}, rho_t = {self.rho_t:.4f}")
         if self.has_boundary_elements:
-            print(f"BE top  : {s.be_thickness_top:.0f} x {s.be_length_top:.0f} mm")
-            print(f"BE bot  : {s.be_thickness_bot:.0f} x {s.be_length_bot:.0f} mm")
+            print(f"BE top  : {u.fmt_length(s.be_thickness_top)} x "
+                  f"{u.fmt_length(s.be_length_top)}")
+            print(f"BE bot  : {u.fmt_length(s.be_thickness_bot)} x "
+                  f"{u.fmt_length(s.be_length_bot)}")
         else:
             print("BE      : none")
         if self._surface is None:
-            print("State   : not run yet — call wall.run() to compute the PMM surface.")
+            print("State   : not run yet -- call wall.run() to compute the PMM surface.")
             return
-        print(f"Po      : {self.Po*u.force_factor:.0f} {u.force}")
-        print(f"To      : {self.To*u.force_factor:.0f} {u.force}")
-        print(f"phi*Vn  : {self.phi_Vn*u.force_factor:.0f} {u.force}  "
-              f"(cap = {self.Vn_max*u.force_factor:.0f} {u.force})")
+        print(f"Po      : {u.fmt_force(self.Po)}")
+        print(f"To      : {u.fmt_force(self.To)}")
+        print(f"phi*Vn  : {u.fmt_force(self.phi_Vn)}  "
+              f"(cap = {u.fmt_force(self.Vn_max)})")
         print(f"max phi*Mn (in-plane)    : "
-              f"{max(self.surface[0.0].phi_Mn)*u.moment_factor:.1f} {u.force}·{u.length}")
+              f"{u.fmt_moment(max(self.surface[0.0].phi_Mn))}")
         print(f"max phi*Mn (out-of-plane): "
-              f"{max(self.surface[90.0].phi_Mn)*u.moment_factor:.1f} {u.force}·{u.length}")
+              f"{u.fmt_moment(max(self.surface[90.0].phi_Mn))}")
+
+        # Steel quantities (kg/m³ of concrete)
+        from design.walls.optimize import (
+            longitudinal_steel_quantity, transverse_steel_quantity,
+        )
+        rho_l = longitudinal_steel_quantity(self)
+        rho_t = 0.0
+        try:
+            db_web = getattr(self, "db_web", None) or 12.0
+            spacing = getattr(self, "web_bar_spacing", None) or 200.0
+            layers = 2 if self.section.tw >= 200.0 else 1
+            rho_t = transverse_steel_quantity(
+                self, db_web=db_web, spacing=spacing, layers=layers,
+            )
+        except Exception:
+            pass
+        print(f"Steel quantities (kg/m^3 of concrete):")
+        print(f"  rho_long  = {rho_l:.2f}")
+        print(f"  rho_trans = {rho_t:.2f}")
+        print(f"  rho_total = {rho_l + rho_t:.2f}")
+
+    def print_design(
+        self,
+        results: "WallDesignResults",
+        *,
+        modes: tuple[str, ...] = ("demand", "capacity", "envelope"),
+    ) -> None:
+        """Print the three-mode design results (English)."""
+        from design.walls.optimize import (
+            longitudinal_steel_quantity, transverse_steel_quantity,
+        )
+        u = self.units
+
+        print()
+        print("=" * 76)
+        print(f"  WALL DESIGN -- {self.label}    (units: {u.name})")
+        print(f"  Section lw = {u.fmt_length(self.section.lw)}   "
+              f"tw = {u.fmt_length(self.section.tw)}   "
+              f"hw = {u.fmt_length(self.hw)}")
+        print("=" * 76)
+
+        for m in modes:
+            p = getattr(results, m, None)
+            if p is None:
+                continue
+            print()
+            print(f"-- [ {m.upper():^8} ] --".center(76, "-"))
+            print(f"  Web rho_l req. = {p.rho_l_required:.4f}    "
+                  f"prov = {p.rho_l_provided:.4f}")
+            print(f"  Web rho_t req. = {p.rho_t_required:.4f}    "
+                  f"prov = {p.rho_t_provided:.4f}")
+            print(f"  Web bars       : phi{p.web_bar_db:.0f} @ "
+                  f"{u.fmt_length(p.web_bar_spacing)}   layers = {p.web_bar_layers}")
+            print(f"  Double curtain : required = {p.double_curtain_required}")
+            print(f"  BE required    : {p.be_required}    "
+                  f"(disp={p.be_required_disp}, stress={p.be_required_stress})")
+            if p.be_required:
+                print(f"    BE length    = {u.fmt_length(p.be_length_proposed)}    "
+                      f"thickness = {u.fmt_length(p.be_thickness_proposed)}")
+            if p.Mpr_in_plane is not None:
+                print(f"  Mpr in-plane   = {u.fmt_moment(p.Mpr_in_plane)}")
+            if getattr(p, "Ve_capacity", None) is not None:
+                print(f"  Ve capacity    = {u.fmt_force(p.Ve_capacity)}")
+            if getattr(p, "phi_Vn", None) is not None:
+                ratio = ((p.Ve_capacity / p.phi_Vn)
+                         if (p.phi_Vn and p.Ve_capacity is not None) else None)
+                print(f"  phi*Vn         = {u.fmt_force(p.phi_Vn)}"
+                      + (f"    Ve/phiVn = {ratio:.2f}" if ratio else ""))
+            # Steel quantities for this mode
+            rho_l = longitudinal_steel_quantity(self)
+            rho_t = transverse_steel_quantity(
+                self,
+                db_web=p.web_bar_db,
+                spacing=p.web_bar_spacing,
+                layers=p.web_bar_layers,
+            )
+            print(f"  steel (kg/m^3): rho_long = {rho_l:.1f}    "
+                  f"rho_trans = {rho_t:.1f}    rho_total = {rho_l + rho_t:.1f}")
+            if p.notes:
+                for n in p.notes:
+                    print(f"  note: {n}")
+        print("=" * 76)
+
+    def print_final(
+        self,
+        proposal: "WallDesignProposal",
+        demands: WallDemands | None = None,
+    ) -> None:
+        """Print the FINAL wall design in one consolidated block (English)."""
+        from design.walls.optimize import (
+            longitudinal_steel_quantity, transverse_steel_quantity,
+        )
+        u = self.units
+        s = self.section
+        fc = s.concrete.fc
+
+        rho_long = longitudinal_steel_quantity(self)
+        rho_trans = transverse_steel_quantity(
+            self,
+            db_web=proposal.web_bar_db,
+            spacing=proposal.web_bar_spacing,
+            layers=proposal.web_bar_layers,
+        )
+        rho_total = rho_long + rho_trans
+
+        bar_w = 76
+        print()
+        print("=" * bar_w)
+        print(f"  WALL -- FINAL DESIGN   |   {self.label}   |   units: {u.name}")
+        print("=" * bar_w)
+        print(f"  Section          : lw = {u.fmt_length(s.lw)}   "
+              f"tw = {u.fmt_length(s.tw)}   "
+              f"hw = {u.fmt_length(self.hw)}")
+        print(f"  Materials        : fc' = {fc:.0f} MPa    "
+              f"fyt = {self.fyt:.0f} MPa")
+        print("-" * bar_w)
+        print(f"  Web distributed reinforcement:")
+        print(f"    rho_l (vert)   = {proposal.rho_l_provided:.4f}   "
+              f"(req {proposal.rho_l_required:.4f})")
+        print(f"    rho_t (horiz)  = {proposal.rho_t_provided:.4f}   "
+              f"(req {proposal.rho_t_required:.4f})")
+        print(f"    bars           : phi{proposal.web_bar_db:.0f} @ "
+              f"{u.fmt_length(proposal.web_bar_spacing)}    layers = {proposal.web_bar_layers}")
+        print(f"    double curtain : {proposal.double_curtain_required}")
+        print(f"  Boundary elements:")
+        print(f"    required       : {proposal.be_required} "
+              f"(by disp={proposal.be_required_disp}, by stress={proposal.be_required_stress})")
+        if proposal.be_required:
+            print(f"    length         = {u.fmt_length(proposal.be_length_proposed)}")
+            print(f"    thickness      = {u.fmt_length(proposal.be_thickness_proposed)}")
+            print(f"    extension above= {u.fmt_length(proposal.be_extension_above)}   "
+                  f"below = {u.fmt_length(proposal.be_extension_below)}")
+        # BE longitudinal + confinement (delegated to the BE Column). The Ash
+        # is computed at the PRORATED axial; §18.10.6.4(g).
+        bep = proposal.be_top_proposal
+        if bep is not None:
+            print(f"    BE confinement (top, Sec.18.10.6.4(g)):")
+            print(f"      Ash req x/y  = {bep.ash_required_x:.0f} / "
+                  f"{bep.ash_required_y:.0f} mm^2   "
+                  f"prov {bep.av_provided_x:.0f}/{bep.av_provided_y:.0f}")
+            print(f"      hoops        = phi{bep.db_hoop:.0f} "
+                  f"@ {u.fmt_length(bep.spacing_confined)}   "
+                  f"legs {bep.n_legs_x}x{bep.n_legs_y}")
+            if bep.rho_s_required is not None:
+                print(f"      rho_s spiral = req {bep.rho_s_required:.4f}  "
+                      f"prov {bep.rho_s_provided if bep.rho_s_provided is not None else float('nan'):.4f}")
+        print("-" * bar_w)
+        print(f"  Capacities:")
+        print(f"    Po              = {u.fmt_force(self.Po)}")
+        print(f"    To              = {u.fmt_force(self.To)}")
+        print(f"    phi*Vn          = {u.fmt_force(self.phi_Vn)}    "
+              f"(max = {u.fmt_force(self.Vn_max)})")
+        print(f"    max phi*Mn (in) = "
+              f"{u.fmt_moment(max(self.surface[0.0].phi_Mn))}")
+        if proposal.Mpr_in_plane is not None:
+            print(f"    Mpr in-plane    = {u.fmt_moment(proposal.Mpr_in_plane)}")
+        # Sectional reference Mpr at zero axial (§18.6.5 form) + out-of-plane.
+        cap_now = self.capacity()
+        if cap_now.Mpr_in_plane_at_zero is not None:
+            print(f"    Mpr in @ P=0    = {u.fmt_moment(cap_now.Mpr_in_plane_at_zero)}")
+        if cap_now.Mpr_out_of_plane is not None:
+            print(f"    Mpr out-of-plane= {u.fmt_moment(cap_now.Mpr_out_of_plane)}")
+        if getattr(proposal, "Ve_capacity", None) is not None:
+            print(f"    Ve capacity     = {u.fmt_force(proposal.Ve_capacity)}")
+        print("-" * bar_w)
+        print(f"  Steel quantities (kg/m^3 of concrete):")
+        print(f"    rho_long        = {rho_long :7.2f}")
+        print(f"    rho_trans       = {rho_trans:7.2f}")
+        print(f"    rho_total       = {rho_total:7.2f}")
+
+        if demands is not None:
+            chk = self.check(demands)
+            tag = lambda b: "PASS" if b else "FAIL"
+            print("-" * bar_w)
+            print(f"  Code check vs demands:")
+            print(f"    PM             : ratio = {chk.ratio_pm:.3f}    "
+                  f"[{tag(chk.ratio_pm <= 1.0)}]")
+            print(f"    Shear in-plane : ratio = {chk.ratio_shear:.3f}    "
+                  f"[{tag(chk.ratio_shear <= 1.0)}]")
+            print(f"    Distrib. rho   : [{tag(chk.distributed_rho_ok)}]")
+            print(f"    Double curtain : [{tag(chk.double_curtain_ok)}]")
+            print(f"    TC             : eps_t = {chk.eps_t_at_demand:.4f}   "
+                  f"[{tag(chk.tension_controlled)}]")
+            print(f"    BE required    : disp={chk.be_required_disp}   "
+                  f"stress={chk.be_required_stress}")
+            if chk.be_required_disp or chk.be_required_stress:
+                print(f"    BE present     : {chk.be_present}   "
+                      f"[{tag((not (chk.be_required_disp or chk.be_required_stress)) or chk.be_present)}]")
+                print(f"    BE confinement : [{tag(chk.be_confinement_ok)}]   "
+                      f"BE long rho {chk.be_long_rho:.4f} (min {chk.be_long_rho_min:.4f}) "
+                      f"[{tag(chk.be_long_rho_ok)}]")
+            if chk.drift_capacity is not None:
+                print(f"    Drift capacity : {chk.drift_capacity:.4f} >= "
+                      f"1.5*demand {chk.drift_capacity_required:.4f}  "
+                      f"[{tag(chk.drift_capacity_ok)}]   "
+                      f"width [{tag(chk.width_ok)}]")
+            print("  " + "-" * (bar_w - 4))
+            print(f"  OVERALL          : {tag(chk.passed)}")
+        print("=" * bar_w)
 
     def report(self) -> dict:
         self._ensure_run()

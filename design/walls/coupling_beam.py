@@ -37,7 +37,7 @@ def coupling_beam_classification(
     Vu_threshold = 0.33 * lam * sqrt(fc) * Acw / 1000.0  # kN
 
     if ln_over_h >= 4.0:
-        notes.append("Design as SMF beam per §18.6.")
+        notes.append("Design as SMF beam per Sec.18.6.")
         return CouplingBeamClassification(
             ln_over_h=ln_over_h,
             type_required="conventional",
@@ -45,7 +45,7 @@ def coupling_beam_classification(
             notes=tuple(notes),
         )
     if ln_over_h < 2.0 and Vu > Vu_threshold:
-        notes.append("Diagonal reinforcement mandatory: ln/h < 2 and Vu > 0.33 λ√f'c Acw.")
+        notes.append("Diagonal reinforcement mandatory: ln/h < 2 and Vu > 0.33 lambda sqrt(f'c) Acw.")
         return CouplingBeamClassification(
             ln_over_h=ln_over_h,
             type_required="diagonal",

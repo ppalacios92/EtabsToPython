@@ -1,0 +1,50 @@
+# Build the MkDocs site and publish to the gh-pages branch.
+# After the first run, set Settings -> Pages -> Source = gh-pages branch.
+name: Deploy docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/web/**'
+      - 'mkdocs.yml'
+      - 'design/**'          # docstring (mkdocstrings) changes redeploy
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: docs-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      # mkdocstrings imports the `design` package at build time, so it must be
+      # importable. `design` is pure Python (numpy + matplotlib); the
+      # `etabstopython` layer needs Windows COM and is documented by hand, so it
+      # is never imported here.
+      - name: Install the design package dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy matplotlib
+
+      - name: Install docs dependencies
+        run: pip install mkdocs-material "mkdocstrings[python]" black
+
+      - name: Make the repo packages importable
+        run: echo "PYTHONPATH=${GITHUB_WORKSPACE}" >> "$GITHUB_ENV"
+
+      - name: Build & deploy to gh-pages
+        run: mkdocs gh-deploy --force

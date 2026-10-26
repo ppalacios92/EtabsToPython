@@ -19,7 +19,9 @@ The protocol that formalizes this contract lives in
 """
 # ---- Canonical re-exports from common ----
 from design.common.materials import Concrete, Steel, Bar
-from design.common.units import UnitSystem, units_from, to_internal
+from design.common.units import (
+    UnitSystem, units_from, to_internal, DEFAULT_UNITS,
+)
 from design.common.bar_schedule import BarSchedule
 from design.common.plot_style import PlotStyle
 from design.common.contracts import (
@@ -40,12 +42,13 @@ from design.sections.wall import WallSection
 from design.beams.beam import Beam
 from design.columns.column import Column
 from design.walls.wall import Wall
+from design.joints.joint import BeamColumnJoint, FramingBeam
 
 __all__ = [
     # Materials
     "Concrete", "Steel", "Bar",
     # Units
-    "UnitSystem", "units_from", "to_internal",
+    "UnitSystem", "units_from", "to_internal", "DEFAULT_UNITS",
     # Bar schedule + plot style
     "BarSchedule", "PlotStyle",
     # Contract
@@ -58,4 +61,5 @@ __all__ = [
     "RebarGroup", "RebarLayout", "RectangularSection", "WallSection",
     # Elements
     "Beam", "Column", "Wall",
+    "BeamColumnJoint", "FramingBeam",
 ]

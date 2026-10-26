@@ -18,6 +18,7 @@ from design.common.materials import Concrete, Steel
 from design.beams.beam import Beam, BeamDemands
 from design.columns.column import Column, ColumnDemands
 from design.walls.wall import Wall, WallDemands
+from design.joints.joint import BeamColumnJoint, FramingBeam
 from design.sections.wall import WallSection
 from design.sections.rectangular import RectangularSection
 from design.sections.reinforcement import RebarLayout, perimeter_bars
@@ -73,6 +74,16 @@ def wall(concrete, steel):
         rebar=RebarLayout(groups=(bars,)),
     )
     return Wall(section=section, hw=10000)
+
+
+@pytest.fixture
+def joint(beam, column):
+    # Interior joint: column above & below, beams left & right.
+    return BeamColumnJoint(
+        col_above=column, col_below=column,
+        beam_left=FramingBeam(beam), beam_right=FramingBeam(beam),
+        moment_condition="P0", probable=True, label="J-test",
+    )
 
 
 @pytest.fixture(params=["beam", "column", "wall"])
@@ -222,3 +233,35 @@ def test_report_returns_dict(element):
     r = element.report()
     assert isinstance(r, dict)
     assert "label" in r
+
+
+# ----------------------------------------------------------------- #
+# Joint — satisfies the same Element contract (capacity-designed, so
+# it deliberately has no `demand` mode). Tested separately because the
+# 4-mode parametrization above does not apply.
+# ----------------------------------------------------------------- #
+def test_joint_satisfies_element_protocol(joint):
+    assert isinstance(joint, Element), (
+        "BeamColumnJoint does not satisfy the Element protocol"
+    )
+
+
+def test_joint_run_returns_self(joint):
+    assert joint.run() is joint
+
+
+def test_joint_apply_is_alias_of_evolve(joint):
+    res = joint.design()
+    new = joint.apply(res.envelope)
+    assert new is not joint
+    assert type(new) is type(joint)
+
+
+def test_joint_set_units_returns_self(joint):
+    assert joint.set_units(12) is joint
+
+
+def test_joint_report_and_summary(joint, capsys):
+    assert isinstance(joint.report(), dict)
+    joint.summary()
+    assert len(capsys.readouterr().out) > 0

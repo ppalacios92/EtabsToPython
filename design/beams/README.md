@@ -10,10 +10,12 @@ This module is **pure engineering**. It does not import anything from
 ETABS, HDF5 readers, or COM. The same `Beam` object works whether you
 build it manually or hand it a `Section` adapted from an external model.
 
-**Beams have no P-M interaction diagram.** ACI §9 and §18.6 treat them
-as flexural elements; M-N coupling lives in Cap. 10 (columns) and §22.4.
-`Mn` is computed in closed form by `mn_doubly` and `Mpr` by `mpr` per
-§18.6.5.1 (both in MPa, mm, kN·m).
+**Ordinary beam design does not use a P-M surface.** ACI §9 and §18.6
+treat beams as flexural elements and `Mn` is computed in closed form by
+`mn_doubly`, `Mpr` by `mpr` per §18.6.5.1 (both in MPa, mm, kN·m).
+A P-M interaction diagram **is** exposed for *inspection* (`beam.pm`,
+`beam.Mn.at(Nu=...)`, `beam.plot.pm()`) built on the strain-compatibility
+kernel; it is optional and never drives the closed-form design path.
 
 ---
 
@@ -226,8 +228,9 @@ beam.plot.demand(demands)            # alias for moment_envelope
 beam.plot.dashboard(demands=demands) # 2x2 grid
 ```
 
-The 16 ETABS unit codes are all supported. There is **no PM curve plot**
-— beams don't have one.
+The 16 ETABS unit codes are all supported. An **inspection** P-M curve
+plot is available via `beam.plot.pm()` (built on the strain-compatibility
+kernel); it is not part of the closed-form design path.
 
 ---
 
@@ -556,8 +559,9 @@ Tags column:
 
 ## 10. Known simplifications
 
-1. **No PM diagram**. Beams in ACI §9 / §18.6 are flexural-shear elements.
-   M-N coupling needs Cap. 10 / Cap. 11 — use a `Column` or `Wall` instead.
+1. **No PM surface in the design path**. Ordinary beam design (ACI §9 /
+   §18.6) is closed-form flexure-shear; the P-M diagram (`beam.pm`) is
+   exposed only for inspection. For axial-coupled design use `Column`/`Wall`.
 
 2. **Mpr ignores compression steel**. `mpr(As=...)` uses only the tension
    area (standard §18.6.5.1 closed-form interpretation).
@@ -660,9 +664,9 @@ python -m design._smoke_test --plot                # writes PNGs to _smoke_plots
 - **`Beam.rectangular(...)` factory**. One-shot constructor that builds
   geometry, rebar layout, and Beam in a single call. `Beam(section=...)`
   remains the low-level path for custom sections.
-- **No PM diagram for beams**. ACI §9 / §18.6 treat beams as flexural-shear
-  elements. Removing the diagram simplified the public surface, the
-  README, and the plotter; nothing was lost on the engineering side.
+- **P-M diagram is inspection-only for beams**. ACI §9 / §18.6 design is
+  closed-form flexure-shear; `beam.pm` / `beam.plot.pm()` expose a P-M
+  curve for inspection but it never drives the design path.
 - **`Vu` is per station, `Vg` is per station**. ETABS naturally emits
   `V` at every frame station; `BeamDemands` keeps the three values.
   Per-station `Vg` (optional) handles non-uniform gravity loading.

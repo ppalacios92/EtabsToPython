@@ -1,0 +1,122 @@
+site_name: EtabsToPython
+site_description: ETABS COM-API extraction + an ACI 318-25 reinforced-concrete design toolkit, in Python.
+site_url: https://ppalacios92.github.io/EtabsToPython/
+repo_url: https://github.com/ppalacios92/EtabsToPython
+repo_name: ppalacios92/EtabsToPython
+edit_uri: edit/main/docs/web/
+
+# Keep MkDocs content in its own folder so any other docs stay untouched.
+docs_dir: docs/web
+
+theme:
+  name: material
+  logo: assets/logo.svg
+  favicon: assets/favicon.svg
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs        # top tabs = the big sections (Guides/Examples/API)
+    - navigation.sections
+    - navigation.top
+    - toc.follow
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search
+  # API reference auto-generated from docstrings for the pure-Python `design`
+  # package. The `etabstopython` layer depends on Windows COM (comtypes) and
+  # will not import on the Linux CI, so its API page is hand-written instead.
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            show_root_heading: true
+            show_source: true
+            show_if_no_docstring: false
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            docstring_section_style: table
+            merge_init_into_class: true
+            filters:
+              - "!^_"
+
+extra_javascript:
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+nav:
+  - Home: index.md
+  - Guides:
+      - Getting started: guides/first_steps.md
+      - ETABS extraction: guides/etabs_extraction.md
+      - Design toolkit — overview: guides/design_overview.md
+      - Beams: guides/beams.md
+      - Columns: guides/columns.md
+      - Walls: guides/walls.md
+      - Beam-column joints: guides/joints.md
+      - Sections & materials: guides/sections.md
+      - The common layer: guides/common.md
+      - Plotting: guides/plotting.md
+  - Examples: examples/index.md
+  - API Reference:
+      - Overview: api/index.md
+      - etabstopython (ETABS layer): api/etabstopython.md
+      - design.common: api/common.md
+      - design.sections: api/sections.md
+      - design.beams: api/beams.md
+      - design.columns: api/columns.md
+      - design.walls: api/walls.md
+      - design.joints: api/joints.md
+      - design.analysis: api/analysis.md
+      - design.plotting: api/plotting.md

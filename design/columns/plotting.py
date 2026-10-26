@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 
-from design.columns.style import PlotStyle
+from design.common.plot_style import PlotStyle
 
 if TYPE_CHECKING:
     from design.columns.column import Column
@@ -45,6 +45,7 @@ class _ColumnPlotter:
             bar_scale=bar_scale if bar_scale is not None else s.bar_scale,
             concrete_color=s.color_concrete,
             rebar_color=s.color_rebar,
+            units=self._column.units,
             **kw,
         )
 
@@ -66,10 +67,10 @@ class _ColumnPlotter:
             reduced_kwargs={"color": s.color_reduced,
                             "lw": s.linewidth,
                             "label": r"$\phi\,M_n / \phi\,P_n$"},
+            units=units,
             **kw,
         )
-        _rescale_axes(ax, units, x="moment", y="force")
-        ax.set_title(f"P-M at θ={angle:.0f}°  ({units.name})")
+        ax.set_title(f"P-M at theta={angle:.0f}deg  ({units.name})")
         return ax
 
     def pm_compare(self, *, angles=(0.0, 45.0, 90.0), ax=None, **kw):
@@ -82,7 +83,7 @@ class _ColumnPlotter:
             d = self._column.surface[theta]
             line, = ax.plot(d.phi_Mn * units.moment_factor,
                             d.phi_Pn * units.force_factor,
-                            lw=s.linewidth, label=f"θ = {theta:.0f}°")
+                            lw=s.linewidth, label=f"theta = {theta:.0f}deg")
             ax.plot(-d.phi_Mn * units.moment_factor,
                     d.phi_Pn * units.force_factor,
                     lw=s.linewidth, color=line.get_color())
@@ -92,8 +93,8 @@ class _ColumnPlotter:
                    label=r"$\phi P_{n,\max}$")
         ax.axhline(0, color="gray", lw=0.5)
         ax.axvline(0, color="gray", lw=0.5)
-        ax.set_xlabel(f"Moment ({units.force}·{units.length})")
-        ax.set_ylabel(f"Axial ({units.force}, + compression)")
+        ax.set_xlabel(f"Moment ({units.moment_label})")
+        ax.set_ylabel(f"Axial ({units.force_label}, + compression)")
         ax.set_title(f"P-M envelopes  ({units.name})")
         ax.grid(True, alpha=s.grid_alpha)
         ax.legend(fontsize=9)
@@ -118,8 +119,8 @@ class _ColumnPlotter:
         else:
             ax.plot_surface(Mx, My, Pu, cmap="viridis",
                             alpha=s.fill_alpha, edgecolor="none")
-        ax.set_xlabel(f"Mx ({units.force}·{units.length})")
-        ax.set_ylabel(f"My ({units.force}·{units.length})")
+        ax.set_xlabel(f"Mx ({units.moment_label})")
+        ax.set_ylabel(f"My ({units.moment_label})")
         ax.set_zlabel(f"Pu ({units.force})")
         ax.set_title(f"P-M-M volume  ({units.name})")
         return ax
@@ -144,8 +145,8 @@ class _ColumnPlotter:
                     "o", color=s.color_demand, ms=8, label="Demand")
         ax.axhline(0, color="gray", lw=0.5)
         ax.axvline(0, color="gray", lw=0.5)
-        ax.set_xlabel(f"Mx ({units.force}·{units.length})")
-        ax.set_ylabel(f"My ({units.force}·{units.length})")
+        ax.set_xlabel(f"Mx ({units.moment_label})")
+        ax.set_ylabel(f"My ({units.moment_label})")
         ax.set_title(f"Biaxial slice at Pu = {Pu*units.force_factor:.0f} {units.force}")
         ax.set_aspect("equal", adjustable="datalim")
         ax.legend(fontsize=9)
@@ -204,36 +205,6 @@ class _ColumnPlotter:
             self.demand(demands, ax=ax4)
         else:
             self.pm(angle=90, ax=ax4)
-            ax4.set_title("P-M at θ=90°  (pass demands to dashboard for biaxial slice)")
+            ax4.set_title("P-M at theta=90deg  (pass demands to dashboard for biaxial slice)")
         fig.tight_layout()
         return fig
-
-
-def _rescale_axes(ax, units, *, x: str, y: str) -> None:
-    """Rescale axis tick labels by multiplicative factor (internal -> display).
-
-    Internally everything is kN, kN·m. Here we relabel.
-    """
-    fac_x = _factor_for(units, x)
-    fac_y = _factor_for(units, y)
-    if fac_x != 1.0:
-        ax.xaxis.set_major_formatter(_mul_formatter(fac_x))
-    if fac_y != 1.0:
-        ax.yaxis.set_major_formatter(_mul_formatter(fac_y))
-    ax.set_xlabel({"moment": f"Moment ({units.force}·{units.length})",
-                   "force":  f"Force ({units.force})"}[x])
-    ax.set_ylabel({"moment": f"Moment ({units.force}·{units.length})",
-                   "force":  f"Force ({units.force}, + compression)"}[y])
-
-
-def _factor_for(units, kind: str) -> float:
-    return {
-        "moment": units.moment_factor,
-        "force":  units.force_factor,
-        "length": units.length_factor,
-    }[kind]
-
-
-def _mul_formatter(factor: float):
-    from matplotlib.ticker import FuncFormatter
-    return FuncFormatter(lambda x, pos: f"{x * factor:.0f}")

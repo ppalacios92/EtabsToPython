@@ -27,22 +27,22 @@ def classify_wall_pier(*, hw: float, lw: float, bw: float) -> WallPierClassifica
     notes: list[str] = []
 
     if lw_over_bw <= 2.5:
-        notes.append("lw/bw <= 2.5: design as SMF column per §18.7.")
+        notes.append("lw/bw <= 2.5: design as SMF column per Sec.18.7.")
         return WallPierClassification(
             hw_over_lw=hw_over_lw,
             lw_over_bw=lw_over_bw,
             classification="column-like",
-            design_path="§18.7 SMF column",
+            design_path="Sec.18.7 SMF column",
             notes=tuple(notes),
         )
-    notes.append("lw/bw > 2.5: design as wall with §18.10.8 modifications.")
-    notes.append("Hoop spacing sv <= 150 mm (§18.10.8.1(d)).")
-    notes.append("Extend transverse reinforcement >= 300 mm above/below clear height (§18.10.8.1(e)).")
+    notes.append("lw/bw > 2.5: design as wall with Sec.18.10.8 modifications.")
+    notes.append("Hoop spacing sv <= 150 mm (Sec.18.10.8.1(d)).")
+    notes.append("Extend transverse reinforcement >= 300 mm above/below clear height (Sec.18.10.8.1(e)).")
     return WallPierClassification(
         hw_over_lw=hw_over_lw,
         lw_over_bw=lw_over_bw,
         classification="wall-like",
-        design_path="§18.10.4 / §18.10.8",
+        design_path="Sec.18.10.4 / Sec.18.10.8",
         notes=tuple(notes),
     )
 

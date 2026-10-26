@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from design.analysis.section_analysis import (
-    PMPoint, pm_at_neutral_axis, pn_max, to_capacity,
+    PMPoint, pm_at_neutral_axis, pn_max, to_capacity, rotated_depth,
 )
 from design.sections.reinforcement import (
     RebarGroup, RebarLayout,
@@ -56,7 +56,7 @@ def probable_interaction_diagram(
     """
     # Lazy import to avoid circular dependency at module load:
     # design.columns.interaction -> design.columns.__init__ -> column.py
-    # which imports from design.columns.probable (shim) -> us.
+    # which imports mpr_envelope from this module.
     from design.columns.interaction import InteractionDiagram
 
     # Build a section view with scaled fy so pm_at_neutral_axis sees fy_pr
@@ -67,8 +67,11 @@ def probable_interaction_diagram(
     Po_pr, _ = pn_max(scaled_section, spiral=spiral)
     To_pr = -to_capacity(scaled_section)
 
-    h = section.height()
-    c_min = 0.001 * h
+    # Bound c by the depth along the rotated y-axis so out-of-plane /
+    # rotated probable diagrams (e.g. wall at angle_deg = 90) sample the
+    # curved region correctly — same fix as in section_analysis.pm_curve.
+    h = rotated_depth(section, angle_deg)
+    c_min = max(0.001 * h, 1.0)
     c_max = 5.0 * h
     cs = np.geomspace(c_min, c_max, max(n_points - 2, 4))
     pts: list[PMPoint] = []
@@ -95,6 +98,33 @@ def probable_interaction_diagram(
         angle_deg=angle_deg,
         spiral=spiral,
     )
+
+
+def mpr_at_axial(
+    section: "Section",
+    *,
+    Nu: float = 0.0,
+    angle_deg: float = 0.0,
+    spiral: bool = False,
+    n_points: int = 80,
+) -> float:
+    """Probable moment Mpr at a given axial load ``Nu`` (kN, + compression).
+
+    ACI 318-25 §18.6.5 / §18.7.6.1 — interpolates the probable interaction
+    diagram (fy_pr = 1.25 fy, phi = 1.0) at ``Pn = Nu``. With the default
+    ``Nu = 0`` this is the classic beam Mpr (the moment when the axial load
+    is zero); for columns and walls pass the acting factored axial ``Pu``
+    to get the capacity-design Mpr at that axial level.
+
+    Returns Mpr in kN·m.
+    """
+    d = probable_interaction_diagram(
+        section, n_points=n_points, angle_deg=angle_deg, spiral=spiral,
+    )
+    Pn = d.Pn
+    Mn = d.Mn
+    order = np.argsort(Pn)
+    return float(np.interp(Nu, Pn[order], Mn[order]))
 
 
 def mpr_envelope(

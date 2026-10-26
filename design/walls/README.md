@@ -302,7 +302,8 @@ web_bar_db, web_bar_spacing, web_bar_layers   (mm, mm, int)
 be_required, be_required_disp, be_required_stress    bool
 be_length_proposed, be_thickness_proposed             mm
 be_extension_above, be_extension_below                mm  (§18.10.6.2)
-c_used                                                mm
+c_used                                                mm   (neutral-axis depth at Pu)
+a_used                                                mm   (a = β1·c — Whitney depth, §22.2.2.4)
 
 # BE detailing (delegated to columns.Column on each BE)
 be_top_proposal, be_bot_proposal              ColumnDesignProposal | None
@@ -327,24 +328,64 @@ notes: tuple[str, ...]
 
 ---
 
-## 7. ACI 318-25 clauses consolidated
+## 7. ACI 318-25 clauses consolidated (coverage matrix)
 
-| Topic | Section | Where in code |
-|---|---|---|
-| Acv (in-plane shear) | §11.5.4 | `WallSection.Acv` |
-| Distributed rho minimum | §11.6 / §18.10.2.1 | `distributed.rho_min_distributed` |
-| Bar spacing / curtains | §11.7 / §18.10.2.2 | `distributed.web_bar_spacing_max`, `two_curtain_required` |
-| Vn wall (alpha_c) | §18.10.4.1 (Table 18.10.4.1) | `shear.alpha_c`, `shear.vn_wall` |
-| Vn cap (0.83 √fc Acv) | §18.10.4.4 | `shear.vn_wall_max` |
-| Av/s for Vu | §22.5 / §11.5 | `shear.av_s_required_wall` |
-| Ve capacity (omega_v) | §18.10.3.1 | `shear.ve_in_plane_capacity`, `shear.omega_v` |
-| BE displacement check | §18.10.6.2 | `boundary.boundary_element_required_displacement` |
-| BE stress check | §18.10.6.3 | `boundary.boundary_element_required_stress` |
-| BE length | §18.10.6.4(a) | `boundary.boundary_extension_length` |
-| BE thickness min | §18.10.6.4(c) | `boundary.be_thickness_minimum` |
-| BE Ash | §18.10.6.4(g) | `boundary.ash_required_be` → delegated to `columns.confinement.ash_required` |
-| Coupling beams | §18.10.7 | `coupling_beam.py` |
-| Wall piers | §18.10.8 | `wall_pier.py` |
+Each row links one clause to where it is enforced. **WC** = checked
+in `Wall.check()`, **WD** = enforced in `Wall.design()`, **WS** = built
+into the PMM machinery (always active), **B** = delegated to
+`design.columns` for the boundary element.
+
+| Topic | Section | Where in code | Phase |
+|---|---|---|---|
+| εcu = 0.003 | §22.2.2.1 | `Concrete.eps_cu` | WS |
+| β₁ (Whitney depth factor) | Table 22.2.2.4.3 | `factors.beta1` | WS |
+| Equivalent stress block `a = β₁·c` | §22.2.2.4 | `boundary.a_at_demand`, `WallCheck.a_at_demand`, proposal `a_used` | WC / WD |
+| Strain compatibility (Pn, Mn) | §22.2 | `analysis.section_analysis.pm_at_neutral_axis` | WS |
+| φ in axial-flexure (Table 21.2.2) | §21.2.2 | `factors.phi_axial_flexure`, `WallCheck.phi_at_demand` | WS / WC |
+| φ in shear (0.75) | §21.2.1 | `factors.phi_shear` | WS |
+| Tension-controlled limit (eps_t ≥ εty + 0.003) | §21.2.2.1 | `boundary.tension_controlled_at_demand`, `WallCheck.tension_controlled` | WC |
+| Po — pure compression | §22.4.2.1 | `analysis.section_analysis.pn_max` | WS |
+| Pn,max cap (0.80 Po ties) | §22.4.2.1 | `InteractionDiagram.Pn_max_phi` | WS |
+| Acv (in-plane shear) | §11.5.4 | `WallSection.Acv` | WS |
+| Distributed ρ minimum | §11.6 / §18.10.2.1 | `distributed.rho_min_distributed` | WD |
+| Bar spacing limits | §11.7 | `distributed.web_bar_spacing_max` | WD (warn) |
+| Two curtains required | §18.10.2.2 / §11.7.2.3 | `distributed.two_curtain_required` | WD (warn) |
+| Vn wall (αc) | Table 18.10.4.1 | `shear.alpha_c`, `shear.vn_wall` | WS / WD |
+| Vn cap (0.83·√fc·Acv) | §18.10.4.4 | `shear.vn_wall_max`, `WallCapacity.Vn_max` | WS |
+| Av/s for Vu (informational) | §22.5 | `shear.av_s_required_wall` | WD |
+| Capacity-design Ve | §18.10.3.1 | `shear.ve_in_plane_capacity` | WD |
+| ωv amplifier | §18.10.3.1.2 | `shear.omega_v` (simplified) | WD |
+| BE displacement check | §18.10.6.2 | `boundary.boundary_element_required_displacement` | WC / WD |
+| BE stress check | §18.10.6.3 | `boundary.boundary_element_required_stress` | WC / WD |
+| BE length | §18.10.6.4(a) | `boundary.boundary_extension_length` | WD |
+| BE thickness min | §18.10.6.4(c) | `boundary.be_thickness_minimum` | WD |
+| BE longitudinal min ρ | §18.10.6.4(b) | `_build_be_section` targets ≈ 1% | WD |
+| BE confinement Ash | §18.10.6.4(g) | `columns.confinement.ash_required` via `wall.be_top.design()` | B |
+| BE hx ≤ 350 mm | §18.10.6.4(h) | `columns.confinement.hx_check` via BE column | B |
+| BE hoop spacing | §18.7.5.3 (referenced by §18.10.6) | `columns.confinement.s_max_confined` via BE column | B |
+| BE confined length lo | §18.7.5.1 | `columns.confinement.lo_length` via BE column | B |
+| Coupling beams | §18.10.7 | `coupling_beam.py` | — |
+| Wall piers | §18.10.8 | `wall_pier.py` | — |
+
+### Defense in depth
+
+Three layers verify each wall:
+
+1. **`Wall.check(demands)`** — reads the current section and returns
+   ratios (PM, shear, BE-disp, BE-stress, distributed ρ ok, double-curtain
+   ok), plus the section-level diagnostics (`c_at_demand`, `a_at_demand`,
+   `tension_controlled`, `eps_t_at_demand`, `phi_at_demand`).
+2. **`Wall.design(demands)`** — runs three modes (minimum, demand,
+   capacity), proposes new BE geometry / rebar / Mpr / Ve, iterates the
+   geometry until BE length stabilises, returns the full
+   `WallDesignResults`.
+3. **`wall.be_top` / `wall.be_bot`** — once a BE exists, the columns
+   pipeline runs on it: Ash, hoops, hx, lo, Mpr — every check from
+   `columns/confinement.py` plus the column PMM surface.
+
+Anything beyond what is in the matrix above is left to the engineer
+(e.g., strict §18.10.3.1.2 height-dependent ωv, BE longitudinal-bar
+buckling per §18.10.6.4(i), out-of-plane shear detailing).
 
 ---
 
@@ -390,9 +431,11 @@ These are explicit choices, not bugs.
    2 × n_y perimeter bars. Override by overriding `bar_schedule`.
 4. **Out-of-plane shear is not detailed** — `WallCheck.ratio_shear_out`
    is always `None`. The PMM surface still covers Mu_out for flexure.
-5. **`c_at_demand` interpolation** picks the nearest PM point to
-   `(Pu/0.9, Mu/0.9)`. With dense diagrams (n_points ≥ 60) the result
-   is within a few mm of the true `c`.
+5. **`c_at_demand` interpolates `c` against `Pn`** along the envelope at
+   `Pn = Pu / 0.9`. This is the strict reading of §18.10.6.2 — read the
+   neutral-axis depth from the envelope at the height of the demand.
+   The result is independent of `Mu` (`Mu` enters via the separate
+   `ratio_pm` PM-envelope check).
 6. **BE bars added in `evolve()` REPLACE web bars in the BE region.**
    The wall starts at its web — when there is no BE, the distributed
    reinforcement runs the full `lw`. When a BE is added, web bars

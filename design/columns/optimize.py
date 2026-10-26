@@ -97,15 +97,19 @@ def transverse_steel_quantity(
     n_legs_x: int,
     n_legs_y: int,
     spacing: float,
-    clear_cover: float = 25.0,
+    clear_cover: float | None = None,
 ) -> float:
     """Mass of transverse steel per m³ of concrete in the lo region (kg/m³).
 
     Uses the column.section + column.bar_schedule + materials.density of
     the first longitudinal group as a proxy for the hoop density (hoops
     are usually the same grade).
+
+    ``clear_cover`` defaults to ``column.section.clear_cover``.
     """
     section = column.section
+    if clear_cover is None:
+        clear_cover = getattr(section, "clear_cover", 25.0)
     b_out = section.width()
     h_out = section.height()
     Ag = section.gross_area()                          # mm²
@@ -137,6 +141,34 @@ def longitudinal_steel_quantity(column: "Column") -> float:
     mass_steel = Ast * 1000.0 * density * 1e-9         # kg/m of column
     volume_concrete = Ag * 1000.0 * 1e-9               # m³ per m of column
     return mass_steel / volume_concrete if volume_concrete > 0 else 0.0
+
+
+def rho_g_check(column: "Column") -> tuple[float, bool, str | None]:
+    """Validate the longitudinal reinforcement ratio ρg = Ast/Ag.
+
+    ACI 318-25 limits:
+        seismic SMF columns (§18.7.4.1): 0.01 <= ρg <= 0.06
+        non-seismic columns (§10.6.1):   0.01 <= ρg <= 0.08
+
+    Returns ``(rho_g, ok, note)`` where ``note`` is ``None`` when within
+    range, otherwise a human-readable violation message citing the clause.
+    The bound is a property of the longitudinal layout only, so it is the
+    same across all transverse-detailing alternatives.
+    """
+    Ag = column.section.gross_area()
+    Ast = column.section.rebar.total_area
+    rho_g = Ast / Ag if Ag > 0 else 0.0
+    rho_max = 0.06 if column.seismic else 0.08
+    clause = "Sec.18.7.4.1" if column.seismic else "Sec.10.6.1"
+    if rho_g < 0.01:
+        return rho_g, False, (
+            f"rho_g = {rho_g*100:.2f}% < 1.0% minimum ({clause})."
+        )
+    if rho_g > rho_max:
+        return rho_g, False, (
+            f"rho_g = {rho_g*100:.2f}% > {rho_max*100:.0f}% maximum ({clause})."
+        )
+    return rho_g, True, None
 
 
 def run_optimize(
@@ -176,6 +208,10 @@ def run_optimize(
 
     rho_long = longitudinal_steel_quantity(column)
 
+    # ---- ρg gate (§18.7.4.1 seismic / §10.6.1) — same for every alt ----
+    _rho_g, rho_g_ok, rho_g_note = rho_g_check(column)
+    rho_g_extra = (rho_g_note,) if rho_g_note else ()
+
     # ---- 1. Baseline ----
     baseline_results = column.design(
         demands, clear_cover=clear_cover,
@@ -199,9 +235,9 @@ def run_optimize(
         rho_transverse=rho_t_base,
         rho_longitudinal=rho_long,
         rho_total=rho_t_base + rho_long,
-        feasible=baseline_ash_ok and baseline.hx_ok,
+        feasible=baseline_ash_ok and baseline.hx_ok and rho_g_ok,
         is_baseline=True,
-        notes=baseline.notes,
+        notes=rho_g_extra + baseline.notes,
     )]
 
     baseline_key = (baseline.db_hoop, baseline.n_legs_x, baseline.n_legs_y)
@@ -220,7 +256,7 @@ def run_optimize(
             p = results.envelope
             ash_ok = (p.av_provided_x >= p.ash_required_x and
                       p.av_provided_y >= p.ash_required_y)
-            feasible = ash_ok and p.hx_ok
+            feasible = ash_ok and p.hx_ok and rho_g_ok
             if not feasible and not include_infeasible:
                 continue
             rho_t = transverse_steel_quantity(
@@ -237,7 +273,7 @@ def run_optimize(
                 rho_total=rho_t + rho_long,
                 feasible=feasible,
                 is_baseline=False,
-                notes=p.notes,
+                notes=rho_g_extra + p.notes,
             ))
 
     alternatives.sort(key=lambda a: getattr(a, sort_by))

@@ -121,21 +121,71 @@ def ash_required(
     fc: float,
     fyt: float,
     Pu_over_Ag_fc: float = 0.0,
+    nl: int | None = None,
 ) -> float:
     """Required area of confining reinforcement Ash in one direction.
 
-    ACI 318-25 §18.7.5.4 (Table) — the larger of (i) and (ii):
+    ACI 318-25 §18.7.5.4, Table 18.7.5.4 (rectilinear hoops) — the
+    greatest of the applicable expressions:
 
-        (i)  Ash = 0.3 * (Ag/Ach - 1) * s * bc * fc / fyt
-        (ii) Ash = 0.09 * s * bc * fc / fyt
+        (a) Ash = 0.3 * (Ag/Ach - 1) * s * bc * fc' / fyt
+        (b) Ash = 0.09 * s * bc * fc' / fyt
+        (c) Ash = 0.2 * kf * kn * Pu * s / (fyt * Ach)
 
-    A third equation applies for high axial load (Pu / (Ag*fc') > 0.3)
-    in some configurations; passed in via ``Pu_over_Ag_fc``.
+    Expression (c) is triggered ONLY for high axial load
+    (Pu/(Ag·fc') > 0.3) or high-strength concrete (fc' > 69 MPa), with
+
+        kf = fc'/172.4 + 0.6 >= 1.0      (Eq. 18.7.5.4a)
+        kn = nl/(nl - 2)                  (Eq. 18.7.5.4b)
+
+    Expressions (a) and (b) are NOT multiplied by kf. ``Pu_over_Ag_fc``
+    is the axial-load ratio Pu/(Ag·fc'); ``nl`` is the number of
+    longitudinal bars laterally supported around the core perimeter
+    (kn = 1 if not provided — conservative).
     """
-    ash_i = 0.3 * (Ag / Ach - 1.0) * s * bc * fc / fyt
-    ash_ii = 0.09 * s * bc * fc / fyt
-    ash = max(ash_i, ash_ii)
-    if Pu_over_Ag_fc > 0.3:
-        ash_iii = 0.2 * (Pu_over_Ag_fc) * s * bc * fc / fyt
-        ash = max(ash, ash_iii)
+    ash_a = 0.3 * (Ag / Ach - 1.0) * s * bc * fc / fyt
+    ash_b = 0.09 * s * bc * fc / fyt
+    ash = max(ash_a, ash_b)
+    if Pu_over_Ag_fc > 0.3 or fc > 68.95:
+        kf = max(fc / 172.4 + 0.6, 1.0)
+        kn = (nl / (nl - 2.0)) if (nl is not None and nl > 2) else 1.0
+        # Table 18.7.5.4 gives Ash/(s·bc); so Ash = expr · s · bc.
+        # Pu [N] = Pu/(Ag·fc') · Ag · fc' ; (c) = 0.2·kf·kn·Pu·s·bc/(fyt·Ach)
+        Pu_N = Pu_over_Ag_fc * Ag * fc
+        ash_c = 0.2 * kf * kn * Pu_N * s * bc / (fyt * Ach)
+        ash = max(ash, ash_c)
     return ash
+
+
+def rho_s_spiral_required(
+    *,
+    Ag: float,
+    Ach: float,
+    fc: float,
+    fyt: float,
+    Pu_over_Ag_fc: float = 0.0,
+) -> float:
+    """Required volumetric ratio of spiral / circular-hoop reinforcement.
+
+    ACI 318-25 §25.7.3.3 and Table 18.7.5.4 (spiral rows) — the greatest
+    of the applicable expressions:
+
+        (d) rho_s = 0.45 * (Ag/Ach - 1) * fc' / fyt
+        (e) rho_s = 0.12 * fc' / fyt
+        (f) rho_s = 0.35 * kf * Pu / (fyt * Ach)
+
+    Expression (f) is triggered ONLY for high axial load
+    (Pu/(Ag·fc') > 0.3) or high-strength concrete (fc' > 69 MPa), with
+    kf = fc'/172.4 + 0.6 >= 1.0. ``fyt`` is capped at 689.5 MPa (100 ksi)
+    per §25.7.3.3. ``Pu_over_Ag_fc`` is the axial-load ratio Pu/(Ag·fc').
+    """
+    fyt = min(fyt, 689.5)  # §25.7.3.3 fyt <= 100 ksi
+    rho_d = 0.45 * (Ag / Ach - 1.0) * fc / fyt
+    rho_e = 0.12 * fc / fyt
+    rho = max(rho_d, rho_e)
+    if Pu_over_Ag_fc > 0.3 or fc > 68.95:
+        kf = max(fc / 172.4 + 0.6, 1.0)
+        Pu_N = Pu_over_Ag_fc * Ag * fc
+        rho_f = 0.35 * kf * Pu_N / (fyt * Ach)
+        rho = max(rho, rho_f)
+    return rho

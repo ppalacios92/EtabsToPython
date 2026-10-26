@@ -14,10 +14,37 @@ Cualquier agente que toque código bajo `design/` debe leerlo antes.
 - **Moment**: kN·m
 - **Area**: mm²
 
-Los factories `.rectangular()` PUEDEN aceptar metros como conveniencia
-(heurística: si `lu < 30` se asume metros), pero deben convertir
-explícitamente. NO hay `*1000` o `/1000` flotantes dispersos en
-`wall.py` / `column.py` / `beam.py`. La conversión vive en el factory.
+Los cálculos internos NUNCA cambian: siempre MPa / mm / kN / kN·m.
+NO hay heurísticas de magnitud (`lu < 30 ⇒ metros`); el sistema de
+unidades es **explícito**.
+
+**Entrada de data** (interpretar lo que el usuario mete):
+- La GEOMETRÍA siempre es canónica **mm** — en los factories
+  `.rectangular(...)` y en los constructores desnudos por igual. El
+  argumento `units=` del factory es **SOLO presentación**: fija `self.units`
+  pero NUNCA reinterpreta la geometría (nada de `to_internal` sobre dims o
+  diámetros de barra). Coherente con las ecuaciones de `common/`.
+- Los constructores desnudos (`Column.__init__`, `RectangularSection`,
+  `Concrete`, `perimeter_bars`) son **INTERNAL-only**: asumen mm/kN/MPa
+  sin convertir.
+- Las CARGAS (no la geometría) sí son unit-aware: pasan por
+  `elem.demands(Pu=..., Mux=..., units=)`, que convierte usando `units` o,
+  si se omite, `self.units`. Por eso `set_units(...)` cambia tanto el display
+  como cómo `demands()` lee fuerzas/momentos/stress posteriores.
+
+**Salida de data** (presentación): `self.units` gobierna lo que muestran
+`summary()`, `report()` y los plots. Se fija con `set_units(...)`.
+
+NO existe global mutable de unidades (se eliminó `_ACTIVE_UNITS` /
+`get_active_units` / `set_active_units`). Las unidades viven en cada
+objeto (`self.units`). El default cuando no se pasa nada es
+`DEFAULT_UNITS = units_from(9)` (N_mm_C), donde N/mm² = MPa y mm = mm,
+así la conversión es identidad.
+
+`to_internal(kind, value, *, units)` exige `units` (keyword obligatorio).
+NO hay `*1000` o `/1000` flotantes dispersos en `wall.py` / `column.py`
+/ `beam.py`; la única conversión de unidades vive en `demands()` (cargas).
+La geometría entra ya en mm, no se convierte.
 
 Las properties `lu_m`, `ln_m`, `hw_m` están permitidas como vista
 legacy en metros sobre el dato canónico en mm.

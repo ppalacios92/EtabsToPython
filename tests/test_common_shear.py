@@ -41,11 +41,11 @@ def test_vc_simplified_lightweight_drops_by_lambda():
     assert Vc_l == pytest.approx(0.75 * Vc_n, rel=1e-9)
 
 
-def test_vc_simplified_sqrt_fc_capped_at_70():
-    """§22.5.3.1: sqrt(fc) capped at sqrt(70 MPa)."""
+def test_vc_simplified_sqrt_fc_capped_at_8p3():
+    """§22.5.3.1: sqrt(fc') shall not exceed 8.3 MPa (= 100 psi) in shear."""
     c_high = Concrete(fc=100.0)
     Vc = vc_simplified(b=300.0, d=540.0, concrete=c_high)
-    expected = 0.17 * 1.0 * sqrt(70.0) * 300.0 * 540.0 / 1000.0
+    expected = 0.17 * 1.0 * 8.3 * 300.0 * 540.0 / 1000.0
     assert Vc == pytest.approx(expected, rel=1e-9)
 
 

@@ -1,22 +1,23 @@
+from pathlib import Path
+
 import comtypes.client
 import numpy as np
 import pandas as pd
 
 
 class EtabsModel:
-    def __init__(self, units: int = 12 , 
+    def __init__(self, units: int = 12 ,
                  name: str = 'PRY00',
-                 
                  ):
         self.units = units
-        self.name=  name    
+        self.name=  name
 
 
         self.model = None
 
 # --------------------------------------------------------------
-        
-            
+
+
         # --- Conexión y unidades ---
         self._connect_to_etabs()
         self._set_units()
@@ -51,9 +52,9 @@ class EtabsModel:
         self.load_modal_participating_mass_ratios()
 
         # --- Cargar story forces ---
-                
+
         self.load_story_forces()
-        
+
 
         # --- Cargar joint displacements ---
         self.load_joint_displacements()
@@ -80,18 +81,30 @@ class EtabsModel:
         df.rename(cols_dict, axis = 'columns', inplace = True)
         return df
 
+    def view(self, **kwargs):
+        """Open a lightweight PyVista/Qt geometry viewer."""
+        from etabstopython.viewer import view_model
+
+        return view_model(self, **kwargs)
+
+    def export_STEP(self, filename: str, **kwargs) -> Path:
+        """Export frames as lines and floors/walls as STEP surfaces."""
+        from etabstopython.step_exporter import export_step
+
+        return export_step(self, filename, **kwargs)
+
 
 # --------------------------------------------------------------
     def load_story_definitions(self):
         table_title = 'Story Definitions'
         df = self._get_table_as_dataframe(table_title)
-        
+
         # Asegurar que la columna de altura sea numérica
         df['Height'] = pd.to_numeric(df['Height'], errors='coerce')
-        
+
         # Calcular altura acumulada desde la base hacia arriba
         df['Accumulated_Height'] = df.iloc[::-1]['Height'].cumsum()[::-1]
-        
+
         # Verificar si 'BASE' ya existe
         if 'BASE' not in df['Story'].values:
             # Tomar la última fila y duplicarla
@@ -104,13 +117,13 @@ class EtabsModel:
         # Guardar el DataFrame completo
         self.story_definitions = df
         # print(f"✅ Loaded Story Definitions: {len(df)} stories.")
-        
+
         # Calcular vector de alturas (agregando 0 al final para tener todas las cotas de niveles)
         heights = df['Accumulated_Height'].to_numpy()
         # heights = np.append(heights, 0)  # piso inferior
         heights = heights[::-1]          # ordenar de base hacia arriba
         heights = np.round(heights, 3)
-        
+
         self.floor_heights = heights
 
     # @property
@@ -137,7 +150,7 @@ class EtabsModel:
 
 
 
-    
+
     def load_frame_section_property_definitions_concrete_rectangular(self):
         table_title='Frame Section Property Definitions - Concrete Rectangular'
         self.frame_section_property_definitions_concrete_rectangular = self._get_table_as_dataframe(table_title)
@@ -198,7 +211,7 @@ class EtabsModel:
             df = pd.DataFrame(columns=columnas_finales)
             self.frames_df = df
             return df
-        
+
         df = pd.concat(frame_parts, ignore_index=True)
 
         # Obtener coordenadas
@@ -292,7 +305,7 @@ class EtabsModel:
                 .astype(float)
                 .to_dict('index')
             )
-            
+
         # print(f"✅ Assigned colors to {len(self.section_color_dict)} frame sections.")
 
 

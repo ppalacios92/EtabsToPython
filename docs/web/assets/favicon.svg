@@ -1,0 +1,6 @@
+<!-- Favicon — the portal frame glyph, simplified, no ring. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none" aria-label="EtabsToPython favicon">
+  <path d="M28 82 L28 28 L72 28 L72 82"
+        stroke="#1f6fb2" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M16 82 L84 82" stroke="#c8772e" stroke-width="7" stroke-linecap="round"/>
+</svg>

@@ -6,7 +6,14 @@ from design.beams.beam import (
     BeamDesignProposal,
     BeamDesignResults,
 )
-from design.beams.style import BeamPlotStyle
+from design.beams.interaction import BeamPMCurve, beam_pm_curve
+from design.beams.probable import (
+    BeamProbable,
+    probable_pm_curve,
+    mpr_at_axial,
+    mpr_envelope_bidirectional,
+)
+from design.common.plot_style import PlotStyle as BeamPlotStyle
 from design.beams.optimize import (
     OptimizeAlternative,
     run_optimize,
@@ -41,6 +48,10 @@ __all__ = [
     # Main
     "Beam", "BeamDemands", "BeamCapacity", "BeamCheck",
     "BeamDesignProposal", "BeamDesignResults",
+    # P-M interaction (inspection)
+    "BeamPMCurve", "beam_pm_curve",
+    "BeamProbable", "probable_pm_curve",
+    "mpr_at_axial", "mpr_envelope_bidirectional",
     # Plotting
     "BeamPlotStyle",
     # Optimize

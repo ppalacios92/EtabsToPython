@@ -4,20 +4,32 @@ Generates feasible (db_top, n_top, db_bot, n_bot, db_stirrup, n_legs)
 combinations from the beam's bar_schedule, runs beam.design() for each,
 and ranks by total steel quantity in kg/m³ of concrete.
 
-Quantity formulas:
+Quantity formulas (mass DENSITY, kg steel / m³ concrete — a weight metric,
+NOT the volumetric ratio rho_s of §25.7.3, which beams do not have):
     longitudinal: (As_top + As_bot) * 1000 mm = volume per metre of beam
-    transverse:   (n_legs * (bw + h - ...) * a_per_leg * (1000/spacing))
-                  approximated as 2*(bw + h - 4*cover) * a_per_leg / spacing
-                  per metre of beam in the lo region.
+    transverse:   closed-hoop centerline perimeter
+                  2*[(bw - 2*cover - db_e) + (h - 2*cover - db_e)] plus
+                  vertical interior legs (h - 2*cover - db_e) each, times
+                  a_per_leg times (1000/spacing), per metre in the lo region.
 """
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import product
 from math import pi
 from typing import TYPE_CHECKING
 
+from design.common.factors import phi_shear
+from design.common.shear import vc_simplified, vs_capacity
+
 if TYPE_CHECKING:
     from design.beams.beam import Beam, BeamDemands, BeamDesignProposal
+
+# Constructive lower bound for hoop spacing (mm) and the candidate grid the
+# optimizer sweeps. Candidates are intersected with [S_MIN, spacing_confined]
+# (the §18.6.4.4 cap realized for each db/n_legs combo) so the optimizer can
+# propose intermediate spacings instead of collapsing onto the cap.
+S_MIN_CONSTRUCTIVE = 50.0
+SPACING_CANDIDATES = (75.0, 100.0, 125.0, 150.0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,18 +57,29 @@ def transverse_steel_quantity(
     n_legs: int,
     spacing: float,
 ) -> float:
-    """Mass of transverse steel per m³ of concrete in the lo region (kg/m³)."""
+    """Transverse-steel MASS DENSITY in the lo region (kg of steel / m³ of
+    concrete).
+
+    NOTE: this is a *mass density* metric for ranking detailing weight, NOT
+    the formal volumetric ratio rho_s of §25.7.3 — beams do not have a rho_s
+    (that governs spirals/columns). The area-based analogue of the confinement
+    demand for a beam is Av/(s*bw); this function only weighs the steel.
+    """
     section = beam.section
     bw = section.width()
     h  = section.height()
     Ag = section.gross_area()
 
-    # Single closed stirrup perimeter, approx
-    perim = 2.0 * (bw + h - 4.0 * beam.cover)
+    # Centerline of the closed hoop: it runs along the bar axis, inset from
+    # each face by (cover + db_e/2), so each side spans (dim - 2*cover - db_e).
+    db_e = db_stirrup                                   # hoop bar diameter
+    perim = 2.0 * ((bw - 2.0 * beam.cover - db_e)
+                   + (h - 2.0 * beam.cover - db_e))
     a_per_leg = pi * db_stirrup ** 2 / 4.0
-    # Extra interior legs add ~bw of length each
+    # Interior legs (crossties) are VERTICAL: length ~ h - 2*cover - db_e,
+    # NOT bw (they tie top to bottom across the depth).
     extra_legs = max(0, n_legs - 2)
-    length_per_hoop = perim + extra_legs * (bw - 2.0 * beam.cover)
+    length_per_hoop = perim + extra_legs * (h - 2.0 * beam.cover - db_e)
     layers_per_m = 1000.0 / spacing
     volume_steel = length_per_hoop * a_per_leg * layers_per_m   # mm³ per m of beam
 
@@ -91,6 +114,41 @@ def longitudinal_steel_quantity(
     return mass / volume_concrete if volume_concrete > 0 else 0.0
 
 
+def _spacing_grid(p: "BeamDesignProposal", spacing_list: list[float]
+                  ) -> list[float]:
+    """Candidate confined-zone spacings for a realized (db, n_legs) combo.
+
+    The grid is ``spacing_list`` intersected with
+    ``[S_MIN_CONSTRUCTIVE, p.spacing_confined]`` (the §18.6.4.4 cap that
+    design() already realized for this combo). The design-derived spacing is
+    always kept so the optimizer never loses the as-designed point.
+    """
+    s_cap = p.spacing_confined
+    grid = {round(s, 6) for s in spacing_list
+            if S_MIN_CONSTRUCTIVE - 1e-6 <= s <= s_cap + 1e-6}
+    grid.add(round(s_cap, 6))                # never drop the design point
+    return sorted(grid)
+
+
+def _proposal_at_spacing(beam: "Beam", p: "BeamDesignProposal",
+                         spacing: float) -> "BeamDesignProposal":
+    """Clone ``p`` at a different hoop spacing, recomputing s-dependent fields.
+
+    Av (db, n_legs) is unchanged, so only spacing_confined, phi_Vn and the
+    Ve/phiVn ratio move. §18.6.4.4 cap is respected by `_spacing_grid`.
+    """
+    d, _, _, _ = beam._depths()
+    bw = beam.section.width()
+    c = beam.section.concrete
+    Vc = vc_simplified(b=bw, d=d, concrete=c)
+    Vs = vs_capacity(Av=p.av_provided, fyt=beam.fyt, d=d, s=spacing)
+    phi_Vn = phi_shear() * (Vc + Vs)
+    ratio = (p.Ve_capacity / phi_Vn
+             if (p.Ve_capacity is not None and phi_Vn > 0) else None)
+    return replace(p, spacing_confined=spacing,
+                   phi_Vn=phi_Vn, ratio_Ve_over_phiVn=ratio)
+
+
 def run_optimize(
     beam: "Beam",
     demands: "BeamDemands | None" = None,
@@ -98,6 +156,7 @@ def run_optimize(
     db_long_list: list[float] | None = None,
     db_stirrup_list: list[float] | None = None,
     n_legs_list: list[int] | None = None,
+    spacing_list: list[float] | None = None,
     include_provided: bool = True,
     include_infeasible: bool = False,
     sort_by: str = "rho_total",
@@ -108,8 +167,12 @@ def run_optimize(
       1. Run beam.design(demands) — baseline (picker chooses everything).
       2. Enumerate (db_top, db_bot, db_stirrup, n_legs) explicitly.
          For each stirrup diameter, also try {2, 3, 4, ...} vertical
-         legs (extra crossties parallel to y-axis).
-      3. Run beam.design() forcing each combo via the picker overrides.
+         legs (extra crossties parallel to y-axis). `n_legs` candidates
+         are filtered to those that geometrically fit the web width.
+      3. Run beam.design() forcing each combo via the picker overrides,
+         then expand each accepted combo over `spacing_list` (intersected
+         with [S_MIN_CONSTRUCTIVE, §18.6.4.4 cap]) so intermediate spacings
+         are proposed instead of collapsing onto the cap.
       4. Feasibility = As provided >= required AND av/s provided >=
          required AND continuity rules. Drop infeasible (unless
          include_infeasible=True).
@@ -121,6 +184,17 @@ def run_optimize(
         db_stirrup_list = list(beam.bar_schedule.hoops)
     if n_legs_list is None:
         n_legs_list = [2, 3, 4]
+    if spacing_list is None:
+        spacing_list = list(SPACING_CANDIDATES)
+
+    # FIX V3(a): drop leg counts that cannot physically fit across the width
+    # (the largest hoop bar gives the most permissive geometric limit). The
+    # horizontal leg spacing limit (~350 mm, analogous to hx §25.7.2.3) caps
+    # n_legs at 1 + floor((bw - 2*cover - db_e) / 350). Without this the sweep
+    # generated 5–6-leg cages that no detail could support in a narrow web.
+    db_e_max = max(db_stirrup_list) if db_stirrup_list else beam.db_stirrup
+    n_legs_max = beam._max_legs(db_e_max)
+    n_legs_list = [n for n in n_legs_list if n <= n_legs_max] or [2]
 
     def _feasible(p: "BeamDesignProposal") -> bool:
         ok_long = (p.As_top_continuous >= max(p.As_top_i_required,
@@ -169,14 +243,20 @@ def run_optimize(
     )]
     # Deduplicate by RESULT (not by input): the picker may fall back to
     # the max diameter when an input doesn't fit, so multiple inputs can
-    # map to the same realized detailing.
+    # map to the same realized detailing. Spacing is part of the key so the
+    # spacing sweep (FIX V3b) yields distinct entries.
     seen: set = {
         (base.db_top, base.n_top,
          base.db_bot, base.n_bot,
-         base.db_stirrup, base.n_legs)
+         base.db_stirrup, base.n_legs,
+         round(base.spacing_confined, 6))
     }
 
-    # ---- Explore: db_top × db_bot × db_stirrup × n_legs ----
+    # ---- Explore: db_top × db_bot × db_stirrup × n_legs × spacing ----
+    # design() fixes the spacing at the §18.6.4.4 cap for each combo; FIX V3b
+    # then expands each accepted combo over the candidate spacing grid so the
+    # optimizer can trade a tighter spacing against fewer legs / smaller bars
+    # instead of collapsing onto one or two spacings.
     for db_top, db_bot, db_stp, n_legs in product(
         sorted(db_long_list), sorted(db_long_list),
         sorted(db_stirrup_list), sorted(n_legs_list),
@@ -186,43 +266,60 @@ def run_optimize(
             db_top=db_top, db_bot=db_bot,
             db_stirrup=db_stp, n_legs=n_legs,
         )
-        p = results.envelope
-        key = (p.db_top, p.n_top, p.db_bot, p.n_bot, p.db_stirrup, p.n_legs)
-        if key in seen:
-            continue
-        seen.add(key)
-        feasible = _feasible(p)
-        if not feasible and not include_infeasible:
-            continue
+        p_base = results.envelope
         rho_long = longitudinal_steel_quantity(
-            beam, As_top=p.As_top_continuous, As_bot=p.As_bot_continuous,
+            beam, As_top=p_base.As_top_continuous,
+            As_bot=p_base.As_bot_continuous,
         )
-        rho_trans = transverse_steel_quantity(
-            beam, db_stirrup=p.db_stirrup, n_legs=p.n_legs,
-            spacing=p.spacing_confined,
-        )
-        alternatives.append(OptimizeAlternative(
-            proposal=p,
-            db_top=p.db_top, n_top=p.n_top,
-            db_bot=p.db_bot, n_bot=p.n_bot,
-            db_stirrup=p.db_stirrup, n_legs=p.n_legs,
-            rho_transverse=rho_trans,
-            rho_longitudinal=rho_long,
-            rho_total=rho_long + rho_trans,
-            feasible=feasible,
-            is_baseline=False,
-            notes=p.notes,
-        ))
+        for s in _spacing_grid(p_base, spacing_list):
+            p = _proposal_at_spacing(beam, p_base, s)
+            key = (p.db_top, p.n_top, p.db_bot, p.n_bot,
+                   p.db_stirrup, p.n_legs, round(p.spacing_confined, 6))
+            if key in seen:
+                continue
+            seen.add(key)
+            feasible = _feasible(p)
+            if not feasible and not include_infeasible:
+                continue
+            rho_trans = transverse_steel_quantity(
+                beam, db_stirrup=p.db_stirrup, n_legs=p.n_legs,
+                spacing=p.spacing_confined,
+            )
+            alternatives.append(OptimizeAlternative(
+                proposal=p,
+                db_top=p.db_top, n_top=p.n_top,
+                db_bot=p.db_bot, n_bot=p.n_bot,
+                db_stirrup=p.db_stirrup, n_legs=p.n_legs,
+                rho_transverse=rho_trans,
+                rho_longitudinal=rho_long,
+                rho_total=rho_long + rho_trans,
+                feasible=feasible,
+                is_baseline=False,
+                notes=p.notes,
+            ))
 
     # ---- Insert PROVIDED if requested and not already in the set ----
     if provided_alt is not None:
+        prov_s = round(provided_alt.proposal.spacing_confined, 6)
         prov_key = (provided_alt.db_top, provided_alt.n_top,
                     provided_alt.db_bot, provided_alt.n_bot,
                     provided_alt.db_stirrup, provided_alt.n_legs)
+        # Prefer an existing entry at the SAME spacing; only collapse onto a
+        # different-spacing variant of the same cage if no exact match exists.
+        exact_i = next(
+            (i for i, a in enumerate(alternatives)
+             if (a.db_top, a.n_top, a.db_bot, a.n_bot,
+                 a.db_stirrup, a.n_legs) == prov_key
+             and round(a.proposal.spacing_confined, 6) == prov_s),
+            None,
+        )
         already_listed = False
         for i, a in enumerate(alternatives):
-            if (a.db_top, a.n_top, a.db_bot, a.n_bot,
-                a.db_stirrup, a.n_legs) == prov_key:
+            same_cage = (a.db_top, a.n_top, a.db_bot, a.n_bot,
+                         a.db_stirrup, a.n_legs) == prov_key
+            same_spacing = round(a.proposal.spacing_confined, 6) == prov_s
+            # If an exact (cage+spacing) match exists, only tag that one.
+            if same_cage and (same_spacing if exact_i is not None else True):
                 # Mark the existing entry as is_provided too
                 alternatives[i] = OptimizeAlternative(
                     proposal=a.proposal,
@@ -302,9 +399,9 @@ def format_optimize_table(alternatives: list[OptimizeAlternative],
     lines.append("-" * len(header))
 
     def _row(rank: int, a: OptimizeAlternative) -> str:
-        top = f"{a.n_top}φ{a.db_top:.0f}"
-        bot = f"{a.n_bot}φ{a.db_bot:.0f}"
-        stp = f"φ{a.db_stirrup:.0f} x {a.n_legs}"
+        top = f"{a.n_top}phi{a.db_top:.0f}"
+        bot = f"{a.n_bot}phi{a.db_bot:.0f}"
+        stp = f"phi{a.db_stirrup:.0f} x {a.n_legs}"
         tags = []
         if a.is_baseline: tags.append("baseline")
         if a.is_provided: tags.append("provided")

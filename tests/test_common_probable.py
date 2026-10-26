@@ -39,8 +39,11 @@ def test_probable_diagram_has_higher_capacity_than_nominal():
     nom = interaction_diagram(sec, n_points=40, angle_deg=0.0)
     pr = probable_interaction_diagram(sec, n_points=40, angle_deg=0.0)
 
-    # Same number of points (anchors are added the same way)
-    assert len(pr.phi_Mn) == len(nom.phi_Mn)
+    # Nominal Pn/Mn arrays still span the full curve and match in length
+    # (the §22.4.2.1 flat-top cap only reshapes the reduced phi_* arrays of
+    # the design diagram; it does NOT touch the probable diagram, which
+    # carries phi = 1.0 and keeps its full nominal curve).
+    assert len(pr.Mn) == len(nom.Mn)
 
     # Probable max Mn should exceed nominal phi_Mn max by a meaningful margin
     assert max(pr.Mn) > max(nom.phi_Mn) * 1.05

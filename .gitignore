@@ -10,3 +10,6 @@ _smoke_plots/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# MkDocs build output
+/site/

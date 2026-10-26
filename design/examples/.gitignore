@@ -1,0 +1,3 @@
+# Jupyter / Python artifacts
+.ipynb_checkpoints/
+__pycache__/

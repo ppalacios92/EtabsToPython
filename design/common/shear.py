@@ -40,17 +40,28 @@ def vc_detailed(
     Ag: float,
     rho_w: float,
     concrete: Concrete,
+    lambda_s: float = 1.0,
 ) -> float:
-    """Detailed Vc per §22.5.5.1 (with axial + rho_w effects).
+    """Detailed Vc per ACI 318-25 §22.5.5.1, Table 22.5.5.1.
+
+        Vc = [0.66 * lambda_s * lambda * rho_w^(1/3) * sqrt(fc')
+              + Nu/(6 Ag)] * bw * d                       [SI, N]
+
+    The axial term ``Nu/(6 Ag)`` is **additive** (Nu positive in
+    compression) and capped at ``0.05 fc'`` per §22.5.5.1.2 — NOT a
+    ``(1 + Nu/14Ag)`` multiplier (that was the superseded 318-14 form).
+    ``lambda_s`` is the size-effect factor (§22.5.5.1.3); it is 1.0 when
+    at least minimum shear reinforcement is provided (Av >= Av,min).
 
     Nu in kN (positive compression); Ag in mm². Returns kN.
     """
     rho_w = max(rho_w, 0.0)
     rho_w_term = (rho_w) ** (1.0 / 3.0) if rho_w > 0 else 0.0
-    Nu_N = Nu * 1000.0
-    Nu_factor = max(1.0 + Nu_N / (14.0 * Ag), 0.0) if Ag > 0 else 1.0
-    Vc = 0.66 * concrete.lam * rho_w_term * concrete.sqrt_fc * b * d * Nu_factor
-    return Vc / 1000.0
+    Nu_N = Nu * 1000.0  # kN -> N
+    nu_term = min(Nu_N / (6.0 * Ag), 0.05 * concrete.fc) if Ag > 0 else 0.0
+    Vc = (0.66 * lambda_s * concrete.lam * rho_w_term * concrete.sqrt_fc
+          + nu_term) * b * d
+    return max(Vc, 0.0) / 1000.0
 
 
 # ---------------------------------------------------------------------------

@@ -72,6 +72,8 @@ def test_element_protocol_recognizes_duck_type():
         def check(self, demands): return None
         def design(self, demands=None): return None
         def evolve(self, proposal): return self
+        def apply(self, proposal): return self
+        def set_units(self, code_or_name): return self
         def summary(self): return None
         def report(self): return {}
 

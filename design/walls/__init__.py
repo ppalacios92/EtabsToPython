@@ -17,6 +17,7 @@ from design.walls.boundary import (
     boundary_element_required_stress,
     boundary_extension_length, be_thickness_minimum,
     propose_be_geometry, c_at_demand, ash_required_be,
+    wall_drift_capacity, boundary_drift_capacity_ok, boundary_width_ok,
     BEGeometryProposal,
 )
 from design.walls.probable import (
@@ -44,6 +45,7 @@ __all__ = [
     "boundary_element_required_stress",
     "boundary_extension_length", "be_thickness_minimum",
     "propose_be_geometry", "c_at_demand", "ash_required_be",
+    "wall_drift_capacity", "boundary_drift_capacity_ok", "boundary_width_ok",
     "BEGeometryProposal",
     # Probable
     "probable_in_plane_diagram", "probable_out_of_plane_diagram",
