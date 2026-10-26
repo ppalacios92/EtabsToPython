@@ -11,6 +11,7 @@ ACI 318-25 references:
     §18.10.3.1    — wall capacity-design shear
     §18.10.4.1    — wall Vn (alpha_c · sqrt(fc) + rho_t·fyt)
     §18.10.4.4    — wall Vn cap
+    §22.6         — two-way (punching) shear
 """
 from __future__ import annotations
 from math import sqrt
@@ -212,6 +213,92 @@ def vc_zero_seismic(
     # convertimos dividiendo por 1000.
     cond_b = Pu < (Ag * fc / 20.0) / 1000.0
     return cond_a and cond_b
+
+
+# ---------------------------------------------------------------------------
+# Two-way (punching) shear (§22.6)
+# ---------------------------------------------------------------------------
+def bo_rectangular(
+    *,
+    c1: float,
+    c2: float,
+    d: float,
+    position: str = "interior",
+) -> float:
+    """Return the rectangular critical perimeter ``bo`` in mm (§22.6.4).
+
+    The critical section is at ``d/2`` from the supported-area faces.  For
+    an edge or corner support, ``c1`` is perpendicular to the free edge;
+    ``c2`` is parallel to it.  ``position`` is ``"interior"``, ``"edge"``,
+    or ``"corner"``.
+    """
+    if position == "interior":
+        return 2.0 * (c1 + d) + 2.0 * (c2 + d)
+    if position == "edge":
+        return 2.0 * (c1 + d / 2.0) + (c2 + d)
+    if position == "corner":
+        return (c1 + d / 2.0) + (c2 + d / 2.0)
+    raise ValueError("position must be 'interior', 'edge', or 'corner'.")
+
+
+def _alpha_s_two_way(position: str) -> float:
+    """Return the §22.6.5.3 alpha_s coefficient for support position."""
+    try:
+        return {"interior": 40.0, "edge": 30.0, "corner": 20.0}[position]
+    except KeyError as exc:
+        raise ValueError("position must be 'interior', 'edge', or 'corner'.") from exc
+
+
+def vc_two_way(
+    *,
+    bo: float,
+    d: float,
+    concrete: Concrete,
+    beta: float = 1.0,
+    position: str = "interior",
+) -> float:
+    """Return two-way concrete shear stress ``vc`` [MPa] (§22.6.5.3).
+
+    The least of the three applicable expressions governs.  ``beta`` is the
+    ratio of the long to short side of the supported area, and ``bo`` and
+    ``d`` are in mm.
+    """
+    if bo <= 0.0 or d <= 0.0:
+        raise ValueError("bo and d must be positive.")
+    if beta <= 0.0:
+        raise ValueError("beta must be positive.")
+    common = lambda_s(d) * concrete.lam * concrete.sqrt_fc
+    alpha_s = _alpha_s_two_way(position)
+    return min(
+        0.33 * common,
+        0.17 * (1.0 + 2.0 / beta) * common,
+        0.083 * (2.0 + alpha_s * d / bo) * common,
+    )
+
+
+def vc_two_way_force(
+    *,
+    bo: float,
+    d: float,
+    concrete: Concrete,
+    beta: float = 1.0,
+    position: str = "interior",
+) -> float:
+    """Return the two-way concrete shear strength ``Vc`` in kN (§22.6.5.3)."""
+    return vc_two_way(
+        bo=bo, d=d, concrete=concrete, beta=beta, position=position,
+    ) * bo * d / 1000.0
+
+
+def vc_two_way_max_with_stirrups(*, d: float, concrete: Concrete) -> float:
+    """Return max ``vc`` [MPa] for two-way shear reinforcement (§22.6.6.1).
+
+    The concrete term is ``0.17 lambda_s lambda sqrt(fc)``.  The associated
+    steel contribution is evaluated separately as ``vs = Av*fyt/(bo*s)``.
+    """
+    if d <= 0.0:
+        raise ValueError("d must be positive.")
+    return 0.17 * lambda_s(d) * concrete.lam * concrete.sqrt_fc
 
 
 # ---------------------------------------------------------------------------

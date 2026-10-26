@@ -34,6 +34,10 @@ from design.common.shear import (
     av_s_required,
     av_s_minimum,
     vc_zero_seismic,
+    bo_rectangular,
+    vc_two_way,
+    vc_two_way_force,
+    vc_two_way_max_with_stirrups,
     alpha_c,
     alpha_sh,
     vn_wall,
@@ -88,6 +92,7 @@ __all__ = [
     # shear
     "vc_simplified", "lambda_s", "vc_one_way", "vc_detailed", "vs_capacity", "vs_max",
     "av_s_required", "av_s_minimum", "vc_zero_seismic",
+    "bo_rectangular", "vc_two_way", "vc_two_way_force", "vc_two_way_max_with_stirrups",
     "alpha_c", "alpha_sh", "vn_wall", "vn_wall_max", "vn_wall_group_max", "ve_in_plane_capacity_wall",
     # spacing
     "lo_length_beam", "lo_length_column",
