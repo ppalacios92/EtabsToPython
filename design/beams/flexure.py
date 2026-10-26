@@ -69,58 +69,54 @@ def mn_doubly(*, b: float, d: float, d_prime: float,
               concrete: Concrete, steel: Steel) -> float:
     """Doubly reinforced rectangular beam. ACI 318-25 §22.2.
 
-    Three branches:
-      1. As_prime <= 0  →  defer to mn_singly (only tension steel).
-      2. As ≈ As' (symmetric)  →  both steels yield, concrete block
-         vanishes: Mn = As · fy · (d − d').
-      3. General case: try with As' at fy; if that is consistent
-         (eps_s' >= eps_y) use it. Otherwise iterate with elastic
-         compression steel.
+    Strain compatibility with the Whitney block (§22.2.2): the neutral-axis
+    depth ``c`` is found by bisection on force equilibrium,
+
+        0.85 fc b a + As' (fs' - 0.85 fc [if d' < a]) = As fs,   a = beta1 c,
+
+    with fs = Es eps_s and fs' = Es eps_s' limited to +/- fy and the strains
+    from eps_cu = 0.003 at the compression face. The "compression" layer may
+    end up in tension when c < d' (thin slabs with equal top and bottom bars);
+    it then adds to the tension force instead of being assumed to yield in
+    compression. Moments are taken about the tension steel. Returns kN·m.
     """
     if As_prime <= 0.0:
         return mn_singly(b=b, d=d, As=As, concrete=concrete, steel=steel)
 
     Es = steel.Es
     fy = steel.fy
+    fc = concrete.fc
+    b1 = concrete.beta1
+    ecu = concrete.eps_cu
 
-    # Symmetric or near-symmetric — closed-form limit.
-    a_yield = (As - As_prime) * fy / (0.85 * concrete.fc * b)
-    if abs(a_yield) < 0.5:
-        Mn = min(As, As_prime) * fy * (d - d_prime)
-        return Mn / 1e6
+    def forces(c: float):
+        a = min(b1 * c, d)
+        Cc = 0.85 * fc * a * b
+        es_p = ecu * (c - d_prime) / c
+        fs_p = max(-fy, min(fy, es_p * Es))
+        if d_prime < a:
+            fs_p -= 0.85 * fc                 # displaced concrete
+        es = ecu * (d - c) / c
+        fs = max(-fy, min(fy, es * Es))       # + tension
+        return a, Cc, fs_p, fs
 
-    # Standard branch: assume As' yields.
-    if a_yield > 0:
-        c_yield = a_yield / concrete.beta1
-        eps_sp = (concrete.eps_cu * (c_yield - d_prime) / c_yield
-                  if c_yield > 0 else 0.0)
-        if eps_sp >= fy / Es:
-            a = a_yield
-            Mn = ((0.85 * concrete.fc * b * a) * (d - a / 2.0)
-                  + As_prime * fy * (d - d_prime))
-            return Mn / 1e6
+    def residual(c: float) -> float:
+        _, Cc, fs_p, fs = forces(c)
+        return Cc + As_prime * fs_p - As * fs
 
-    # Iterate with elastic compression steel.
-    a = max(a_yield, 5.0)
-    for _ in range(30):
-        c = a / concrete.beta1
-        if c <= d_prime:
-            fs_p = 0.0
+    lo, hi = 1e-6 * d, d
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if residual(mid) > 0.0:
+            hi = mid
         else:
-            fs_p = min(concrete.eps_cu * (c - d_prime) / c * Es, fy)
-        a_new = (As * fy - As_prime * fs_p) / (0.85 * concrete.fc * b)
-        if a_new <= 0:
+            lo = mid
+        if hi - lo < 1e-9 * d:
             break
-        if abs(a_new - a) < 0.1:
-            a = a_new
-            break
-        a = a_new
-
-    c = a / concrete.beta1
-    fs_p = (min(concrete.eps_cu * (c - d_prime) / c * Es, fy)
-            if c > d_prime else 0.0)
-    Mn = ((0.85 * concrete.fc * b * a) * (d - a / 2.0)
-          + As_prime * fs_p * (d - d_prime))
+    c = 0.5 * (lo + hi)
+    a, Cc, fs_p, fs = forces(c)
+    # moments about the tension steel
+    Mn = Cc * (d - a / 2.0) + As_prime * fs_p * (d - d_prime)
     return Mn / 1e6
 
 
