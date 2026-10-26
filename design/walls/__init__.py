@@ -4,7 +4,7 @@ from design.walls.wall import (
     WallDesignProposal, WallDesignResults,
 )
 from design.walls.shear import (
-    alpha_c, vn_wall, vn_wall_max,
+    alpha_c, alpha_sh, vn_wall, vn_wall_max, vn_wall_group_max,
     omega_v, av_s_required_wall, ve_in_plane_capacity,
     rho_distributed_min, web_double_curtain_required,
 )
@@ -34,7 +34,7 @@ __all__ = [
     "Wall", "WallDemands", "WallCapacity", "WallCheck",
     "WallDesignProposal", "WallDesignResults",
     # Shear
-    "alpha_c", "vn_wall", "vn_wall_max",
+    "alpha_c", "alpha_sh", "vn_wall", "vn_wall_max", "vn_wall_group_max",
     "omega_v", "av_s_required_wall", "ve_in_plane_capacity",
     "rho_distributed_min", "web_double_curtain_required",
     # Distributed

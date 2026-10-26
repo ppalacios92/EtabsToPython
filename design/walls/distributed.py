@@ -2,6 +2,8 @@
 from __future__ import annotations
 from math import sqrt, pi
 
+from design.common.factors import phi_shear
+
 
 def rho_min_distributed(
     *,
@@ -9,17 +11,30 @@ def rho_min_distributed(
     Acv: float,
     fc: float,
     lam: float = 1.0,
+    special: bool = False,
+    db: float = 16.0,
+    fy: float = 420.0,
 ) -> tuple[float, float]:
     """Return (rho_l_min, rho_t_min).
 
-    ACI 318-25 §11.6.1: rho_min = 0.0025 when Vu > 0.083 lambda sqrt(fc) Acv,
-    otherwise 0.0020 (§11.6.2). For special structural walls §18.10.2.1
-    forces the 0.0025 floor regardless of Vu.
+    At high shear (``Vu > 0.083 lambda sqrt(fc) Acv``), §11.6.2 requires
+    0.0025 in both directions.  At lower shear, Table 11.6.1 supplies the
+    low-shear ratios for cast-in-place walls with deformed bars.  Special
+    structural walls use those Table 11.6.1 values only through the
+    §18.10.2.1 low-shear exception; otherwise their minimum is 0.0025.
     """
-    threshold = 0.083 * lam * sqrt(fc) * Acv / 1000.0   # kN
-    if Vu > threshold:
+    threshold_high = 0.083 * lam * sqrt(fc) * Acv / 1000.0
+    if Vu > threshold_high:
         return 0.0025, 0.0025
-    return 0.0020, 0.0020
+    threshold_low = 0.04 * phi_shear() * lam * sqrt(fc) * Acv / 1000.0
+    if Vu <= threshold_low:
+        if db <= 16.0 and fy >= 420.0:
+            return 0.0012, 0.0020
+        return 0.0015, 0.0025
+    # This is the remaining low-shear Table 11.6.1 range.  For special
+    # walls it is permitted by the §18.10.2.1 exception; for other walls it
+    # is the table value as well.
+    return 0.0015, 0.0025
 
 
 def web_bar_spacing_max(*, lw: float, tw: float) -> float:

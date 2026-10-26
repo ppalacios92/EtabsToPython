@@ -251,14 +251,51 @@ def vn_wall(
     return Vn / 1000.0
 
 
-def vn_wall_max(*, Acv: float, fc: float) -> float:
+def alpha_sh(*, acf: float = 0.0, bcf: float | None = None, bw: float) -> float:
+    """Return the wall shear coefficient ``alpha_sh`` of §18.10.4.4.
+
+    ``acf`` is the area of the flange in compression and ``bcf`` its
+    effective width.  A wall without a flange has ``acf=0`` and therefore
+    returns 1.0.  Supplying a positive ``acf`` requires a positive ``bcf``.
+    """
+    if acf <= 0.0:
+        return 1.0
+    if bcf is None or bcf <= 0.0 or bw <= 0.0:
+        raise ValueError("bcf and bw must be positive when acf is positive.")
+    value = 0.7 * (1.0 + sqrt(acf / (bcf * bw)))
+    return min(1.2, max(1.0, value))
+
+
+def vn_wall_max(*, Acv: float, fc: float, alpha_sh: float = 1.0) -> float:
     """Cap on wall Vn. ACI 318-25 §18.10.4.4.
 
-        Vn <= 0.83 * sqrt(fc) * Acv   [SI form ~ 10 sqrt(fc psi)]
+        Vn <= alpha_sh * 0.83 * sqrt(fc) * Acv
+        [SI form ~ 10 sqrt(fc psi)]
 
     Returns kN.
     """
-    return 0.83 * sqrt(fc) * Acv / 1000.0
+    return alpha_sh * 0.83 * sqrt(fc) * Acv / 1000.0
+
+
+def vn_wall_group_max(
+    *,
+    acv_list: list[float] | tuple[float, ...],
+    fc: float,
+    alpha_sh_list: list[float] | tuple[float, ...] | None = None,
+) -> float:
+    """Return the group wall-shear upper bound of §18.10.4.4 in kN.
+
+    ``acv_list`` contains the vertical concrete areas of the wall segments
+    that share a common lateral force.  ``alpha_sh_list`` defaults to 1.0
+    for every segment.
+    """
+    if alpha_sh_list is None:
+        alpha_sh_list = [1.0] * len(acv_list)
+    if len(alpha_sh_list) != len(acv_list):
+        raise ValueError("alpha_sh_list must have one entry per Acv value.")
+    return 0.66 * sqrt(fc) * sum(
+        alpha * acv for alpha, acv in zip(alpha_sh_list, acv_list)
+    ) / 1000.0
 
 
 def ve_in_plane_capacity_wall(

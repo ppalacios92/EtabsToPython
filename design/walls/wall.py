@@ -38,7 +38,8 @@ from design.common.factors import phi_shear
 from design.common.materials import Bar, Concrete, Steel
 from design.common.plot_style import PlotStyle
 from design.common.shear import (
-    alpha_c, vn_wall, vn_wall_max, ve_in_plane_capacity_wall,
+    alpha_c, vn_wall, vn_wall_max, vn_wall_group_max,
+    ve_in_plane_capacity_wall,
 )
 from design.common.units import UnitSystem, units_from, to_internal, DEFAULT_UNITS
 from design.common.element_base import ElementBase
@@ -106,6 +107,8 @@ class WallCapacity:
     diagram_out: Optional[InteractionDiagram]  # out-of-plane (angle 90)
     phi_Vn: float
     Vn_max: float
+    Vn_max_individual: float
+    Vn_max_group_per_wall: float
     rho_t_provided: float
     rho_l_provided: float
     rho_l_min: float
@@ -311,7 +314,8 @@ class Wall(ElementBase):
         "rho_t", "rho_l", "fyt",
         "seismic", "omega_v_factor", "hx",
         "transverse_bar_diameter", "web_bar_diameter",
-        "n_x_be",                                       # bars across BE thickness — §18.10.6.4(b)
+        "n_x_be",                                       # bars across BE thickness
+        "n_walls_sharing",                              # wall segments sharing storey shear
         "be_db_default", "be_n_y_default",              # as-built BE bar size + count (for optimize)
         "label", "bar_schedule", "units", "run_settings", "style",
         "_surface", "_inner_surface",
@@ -335,6 +339,7 @@ class Wall(ElementBase):
         transverse_bar_diameter: float = 10.0,
         web_bar_diameter: float = 10.0,
         n_x_be: int = 3,
+        n_walls_sharing: int = 1,
         be_db_default: float = 22.0,
         be_n_y_default: int = 5,
         units: int | str | UnitSystem | None = None,
@@ -353,15 +358,18 @@ class Wall(ElementBase):
         self.hx = hx
         self.transverse_bar_diameter = transverse_bar_diameter
         self.web_bar_diameter = web_bar_diameter
-        # ACI 318-25 §18.10.6.4(b) — column-style BE detailing. The minimum
-        # is 3 (one interior bar on each long face that can be tied as a
-        # crosstie). For barbell walls (be_thickness >> tw) use 4 or more.
-        if n_x_be < 3:
+        # Two tied curtains across a boundary element are valid.  The
+        # transverse reinforcement is instead governed by §18.10.6.4(f) and
+        # the applicable hx limits.
+        if n_x_be < 2:
             raise ValueError(
-                f"n_x_be={n_x_be} violates ACI 318-25 §18.10.6.4(b) — "
-                "boundary elements need column-style detailing (n_x_be >= 3)."
+                f"n_x_be={n_x_be} is invalid — boundary elements require "
+                "at least two bar curtains (n_x_be >= 2)."
             )
         self.n_x_be = n_x_be
+        if n_walls_sharing < 1:
+            raise ValueError("n_walls_sharing must be at least 1.")
+        self.n_walls_sharing = n_walls_sharing
         # As-built BE longitudinal detailing — kept on the wall so the
         # optimizer can use it as the baseline reference (the bars
         # themselves live in section.rebar).
@@ -431,7 +439,8 @@ class Wall(ElementBase):
         be_align: str | None = None,
         be_top_align: str | None = None,
         be_bot_align: str | None = None,
-        n_x_be: int = 3,                       # bars across BE thickness — §18.10.6.4(b)
+        n_x_be: int = 3,                       # bars across BE thickness
+        n_walls_sharing: int = 1,              # identical walls sharing storey shear
         n_y_be: int = 4,                       # bars along BE length
         db_be: float = 20.0,
         # --- transverse / seismic ---
@@ -537,11 +546,9 @@ class Wall(ElementBase):
         groups: list[RebarGroup] = [web_group]
 
         # --- BE perimeter cages (if requested) ---
-        # ACI 318-25 §18.10.6.4(b) requires column-style detailing in the
-        # BE. n_x_be is the number of longitudinal bars across the BE
-        # thickness — minimum 3 (default) to allow at least one interior
-        # bar that can be tied as a crosstie. Many engineers use n_x_be=4
-        # in barbell walls (be_thickness > tw).
+        # n_x_be is the number of longitudinal bars across the BE thickness.
+        # Two curtains are permitted; transverse reinforcement is checked
+        # separately through §18.10.6.4(f) and hx.
         cover_centroid_be = cover + db_stirrup + db_be / 2.0
         if be_top_length > 0:
             cy_top = lw / 2 - be_top_length / 2
@@ -590,6 +597,7 @@ class Wall(ElementBase):
             transverse_bar_diameter=db_stirrup,
             web_bar_diameter=db_web,
             n_x_be=n_x_be,
+            n_walls_sharing=n_walls_sharing,
             be_db_default=db_be,
             be_n_y_default=n_y_be,
             units=u,
@@ -700,7 +708,7 @@ class Wall(ElementBase):
             rho_t=self.rho_t, fyt=self.fyt,
             hw_over_lw=hw_over_lw, lam=s.concrete.lam,
         )
-        Vn_cap = vn_wall_max(Acv=s.Acv, fc=s.concrete.fc)
+        Vn_cap = self.Vn_max
         self._phi_Vn = phi_shear() * min(Vn, Vn_cap)
         return self
 
@@ -738,7 +746,25 @@ class Wall(ElementBase):
 
     @property
     def Vn_max(self) -> float:
+        return min(self.Vn_max_individual, self.Vn_max_group_per_wall)
+
+    @property
+    def Vn_max_individual(self) -> float:
+        """Individual-wall §18.10.4.4 upper bound, in kN."""
         return vn_wall_max(Acv=self.section.Acv, fc=self.section.concrete.fc)
+
+    @property
+    def Vn_max_group_per_wall(self) -> float:
+        """Common-lateral-force group limit allocated to this wall, in kN."""
+        if self.n_walls_sharing == 1:
+            # A solitary wall has no group reduction; preserve the historic
+            # individual-wall upper bound.
+            return self.Vn_max_individual
+        group_cap = vn_wall_group_max(
+            acv_list=[self.section.Acv] * self.n_walls_sharing,
+            fc=self.section.concrete.fc,
+        )
+        return group_cap / self.n_walls_sharing
 
     @property
     def Mn(self) -> _DiagramFieldView:
@@ -857,10 +883,14 @@ class Wall(ElementBase):
             self.run(n_angles=n_angles, n_points=n_points)
 
         s = self.section
-        Vu_kN = 0.0  # capacity() has no demands — use 0 for the rho-min branch
-        rho_l_min, rho_t_min = rho_min_distributed(
-            Vu=Vu_kN, Acv=s.Acv, fc=s.concrete.fc, lam=s.concrete.lam,
-        )
+        Vu_kN = 0.0  # capacity() has no demand for the §18.10.2.1 exception
+        if self.seismic:
+            rho_l_min, rho_t_min = 0.0025, 0.0025
+        else:
+            rho_l_min, rho_t_min = rho_min_distributed(
+                Vu=Vu_kN, Acv=s.Acv, fc=s.concrete.fc, lam=s.concrete.lam,
+                special=False, db=self.web_bar_diameter, fy=self.fyt,
+            )
         hw_over_lw = self.hw / s.lw if s.lw > 0 else float("inf")
         dc = two_curtain_required(
             Vu=Vu_kN, Acv=s.Acv, fc=s.concrete.fc, lam=s.concrete.lam,
@@ -890,6 +920,8 @@ class Wall(ElementBase):
             diagram_out=diagram_out,
             phi_Vn=self.phi_Vn,
             Vn_max=self.Vn_max,
+            Vn_max_individual=self.Vn_max_individual,
+            Vn_max_group_per_wall=self.Vn_max_group_per_wall,
             rho_t_provided=self.rho_t,
             rho_l_provided=self.rho_l,
             rho_l_min=rho_l_min,
@@ -911,6 +943,11 @@ class Wall(ElementBase):
         biaxial = abs(demands.Mu_out) > 0
         cap = self.capacity(biaxial=biaxial)
         s = self.section
+        rho_l_min, rho_t_min = rho_min_distributed(
+            Vu=demands.Vu, Acv=s.Acv, fc=s.concrete.fc, lam=s.concrete.lam,
+            special=self.seismic, db=self.web_bar_diameter, fy=self.fyt,
+        )
+        cap = replace(cap, rho_l_min=rho_l_min, rho_t_min=rho_t_min)
 
         # PM ratio
         if biaxial:
@@ -1199,6 +1236,7 @@ class Wall(ElementBase):
         # ---- Distributed reinforcement (§18.10.2 / §11.6) ----
         rho_l_min, rho_t_min = rho_min_distributed(
             Vu=Vu, Acv=s.Acv, fc=c.fc, lam=c.lam,
+            special=self.seismic, db=self.web_bar_diameter, fy=self.fyt,
         )
         # Required rho_t to cover Vu (the simplified path of §18.10.4.1).
         # Vc_term is the concrete contribution of Vn_wall (rho_t=0).
@@ -1248,7 +1286,7 @@ class Wall(ElementBase):
             Acv=s.Acv, fc=c.fc, rho_t=rho_t_prov, fyt=self.fyt,
             hw_over_lw=hw_over_lw, lam=c.lam,
         )
-        Vn_cap = vn_wall_max(Acv=s.Acv, fc=c.fc)
+        Vn_cap = self.Vn_max
         phi_Vn = phi_shear() * min(Vn_provided, Vn_cap)
         phi_Vn_max = phi_shear() * Vn_cap
 
@@ -1587,6 +1625,7 @@ class Wall(ElementBase):
             transverse_bar_diameter=self.transverse_bar_diameter,
             web_bar_diameter=self.web_bar_diameter,
             n_x_be=self.n_x_be,
+            n_walls_sharing=self.n_walls_sharing,
             be_db_default=self.be_db_default,
             be_n_y_default=self.be_n_y_default,
             units=self.units,

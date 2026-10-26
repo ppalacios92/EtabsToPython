@@ -3,6 +3,7 @@ from __future__ import annotations
 from math import sqrt
 
 from design.common.factors import phi_shear
+from design.common.shear import alpha_sh, vn_wall_group_max
 
 
 def alpha_c(hw_over_lw: float) -> float:
@@ -31,9 +32,9 @@ def vn_wall(*, Acv: float, fc: float, rho_t: float, fyt: float,
     return Vn / 1000.0
 
 
-def vn_wall_max(*, Acv: float, fc: float) -> float:
-    """Cap Vn <= 0.83 sqrt(fc) Acv. §18.10.4.4 (SI form ~ 10 sqrt psi)."""
-    return 0.83 * sqrt(fc) * Acv / 1000.0
+def vn_wall_max(*, Acv: float, fc: float, alpha_sh: float = 1.0) -> float:
+    """Cap Vn <= alpha_sh * 0.83 sqrt(fc) Acv. §18.10.4.4."""
+    return alpha_sh * 0.83 * sqrt(fc) * Acv / 1000.0
 
 
 def omega_v(
