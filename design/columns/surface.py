@@ -58,11 +58,16 @@ class Surface:
     def volume(self, *, n_Pu: int = 25,
                Pu_min: float | None = None,
                Pu_max: float | None = None,
-               full_circle: bool = True
+               full_circle: bool = True,
+               close_top: bool = True,
                ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Sample the volume on a grid (Pu, theta). Returns (Pu, Mx, My) grids."""
+        """Sample the volume on a grid (Pu, theta). Returns (Pu, Mx, My) grids.
+
+        ``close_top`` closes the surface with the flat phi*Pn,max plateau.
+        """
         return self._inner.volume_slices(
             n_Pu=n_Pu, Pu_min=Pu_min, Pu_max=Pu_max, full_circle=full_circle,
+            close_top=close_top,
         )
 
     def check(self, *, Pu: float, Mux: float, Muy: float

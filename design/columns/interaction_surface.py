@@ -92,8 +92,14 @@ class InteractionSurface:
         Pu_min: float | None = None,
         Pu_max: float | None = None,
         full_circle: bool = True,
+        close_top: bool = True,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Sample the interaction volume on a grid of (Pu, theta)."""
+        """Sample the interaction volume on a grid of (Pu, theta).
+
+        ``close_top`` appends a last row with Mx = My = 0 at ``Pu_max`` so the
+        surface is closed by the flat phi*Pn,max plateau (§22.4.2.1) instead of
+        ending in an open ring.
+        """
         if Pu_min is None:
             Pu_min = min(d.To for d in self.diagrams)
         if Pu_max is None:
@@ -109,6 +115,10 @@ class InteractionSurface:
 
         Mx_grid = np.stack(rows_mx, axis=0)
         My_grid = np.stack(rows_my, axis=0)
+        if close_top:
+            Mx_grid = np.vstack([Mx_grid, np.zeros((1, Mx_grid.shape[1]))])
+            My_grid = np.vstack([My_grid, np.zeros((1, My_grid.shape[1]))])
+            Pu_axis = np.r_[Pu_axis, Pu_axis[-1]]
         Pu_grid = np.broadcast_to(Pu_axis[:, None], Mx_grid.shape).copy()
         return Pu_grid, Mx_grid, My_grid
 
