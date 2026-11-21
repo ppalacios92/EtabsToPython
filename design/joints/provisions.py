@@ -143,15 +143,16 @@ def min_joint_depth(
 
 
 def ldh_hook(*, fy: float, db: float, lam: float, sqrt_fc: float) -> float:
-    """Hooked-bar development length ldh. ACI 318-25 §18.8.5.1.
+    """Hooked-bar development length ldh. ACI 318-25 §18.8.5.1 (SI form).
 
-        ldh = fy * db / (65 * lambda * sqrt(fc'))   [mm]
+        ldh = fy * db / (5.4 * lambda * sqrt(fc'))   [mm]
         ldh >= max(8 db, 150 mm)  (normalweight)
              >= max(10 db, 190 mm) (lightweight, lam < 1)
 
-    fy, sqrt_fc in MPa; db in mm.
+    fy, sqrt_fc in MPa; db in mm. The inch-pound form of the same equation uses 65 with fy and sqrt(fc') in psi;
+    using 65 with MPa gives an ldh about 12 times too short, so the minimum always governed.
     """
-    ldh = fy * db / (65.0 * lam * sqrt_fc)
+    ldh = fy * db / (5.4 * lam * sqrt_fc)
     if lam >= 1.0:
         floor = max(8.0 * db, 150.0)
     else:
